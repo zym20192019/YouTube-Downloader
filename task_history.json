@@ -1,0 +1,22 @@
+{
+  "26aaf101": {
+    "task_id": "26aaf101",
+    "url": "https://www.youtube.com/watch?v=Dgv7qDtNn_g",
+    "title": "[4K] 9\ud68c LKM \ubc14\uc774\ud06c\uc1fc  \ub808\uc774\uc2f1\ubaa8\ub378 \ubbfc\ud55c\ub098 #7 \uc9c1\ucea0 (9th LKM Bike Show  Model Min Hanna fancam)",
+    "format": "best",
+    "quality": null,
+    "status": "error",
+    "progress": 0.0,
+    "speed": null,
+    "eta": null,
+    "filename": null,
+    "filepath": null,
+    "filesize": null,
+    "error": "'>' not supported between instances of 'str' and 'int'",
+    "thumbnail": "https://i.ytimg.com/vi/Dgv7qDtNn_g/maxresdefault.jpg",
+    "duration": 108,
+    "created_at": "2026-04-27T07:52:06.127092",
+    "updated_at": "2026-04-27T07:52:12.793360",
+    "cloud_path": null
+  }
+}

@@ -29,6 +29,10 @@ def _format_seconds(seconds: Optional[float]) -> Optional[str]:
 def _format_bytes(bytes_val: Optional[float]) -> Optional[str]:
     if not bytes_val:
         return None
+    try:
+        bytes_val = float(bytes_val)
+    except (ValueError, TypeError):
+        return None
     for unit in ["B", "KB", "MB", "GB"]:
         if bytes_val < 1024:
             return f"{bytes_val:.1f}{unit}"
@@ -77,13 +81,19 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
     def progress_hook(d: dict):
         if d["status"] == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
-            downloaded = d.get("downloaded_bytes", 0)
+            downloaded = d.get("downloaded_bytes", 0) or 0
+            try:
+                total = int(total) if total else 0
+                downloaded = int(downloaded) if downloaded else 0
+            except (ValueError, TypeError):
+                total = 0
+                downloaded = 0
             if total and total > 0:
                 pct = (downloaded / total) * 100
             else:
                 pct = 0
-            speed = _format_bytes(d.get("speed", 0))
-            eta = _format_seconds(d.get("eta"))
+            speed = _format_bytes(d.get("speed") or 0)
+            eta = _format_seconds(d.get("eta") or 0)
             task_manager.set_progress(task_id, pct, speed, eta)
         elif d["status"] == "finished":
             task_manager.set_progress(task_id, 99.0, None, "Processing...")
@@ -102,7 +112,7 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
         "fragment_retries": 10,
         "file_access_retries": 5,
         "retry_sleep": 2,
-        "buffersize": "1024",
+        "buffersize": 1024,
         "concurrent_fragment_downloads": 4,
         "js_runtimes": {"node": {}},              # YouTube JS 签名解析
         "geo_bypass": True,                        # 绕过地理限制
