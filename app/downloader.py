@@ -61,18 +61,12 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
             "key": "FFmpegVideoRemuxer",
             "preferedformat": "mp4",
         }]
-    else:  # best
-        format_spec = "bestvideo+bestaudio/best"
+    else:  # best — always prefer HDR when available
+        format_spec = "bestvideo[dynamicrange=hdr]+bestaudio/bestvideo[height<=4320][color_primaries=bt2020]+bestaudio/bestvideo+bestaudio/best"
         postprocessors = [{
             "key": "FFmpegVideoRemuxer",
             "preferedformat": "mp4",
         }]
-
-    # HDR preference: try HDR formats first, fall back to normal
-    if hdr == "hdr" and fmt != DownloadFormat.AUDIO:
-        # Prefer HDR formats (dynamicrange=hdr or bt2020 color primaries)
-        # Use "/" for fallback: try HDR first, if not available use normal
-        format_spec = f"bestvideo[dynamicrange=hdr]+bestaudio/bestvideo[height<=4320][color_primaries=bt2020]+bestaudio/best/{format_spec}"
 
     def progress_hook(d: dict):
         if d["status"] == "downloading":
