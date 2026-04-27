@@ -97,12 +97,17 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
         "merge_output_format": "mp4",
         "postprocessors": postprocessors if fmt == DownloadFormat.AUDIO else [],
         "noplaylist": True,
-        "socket_timeout": 30,
-        "retries": 3,
-        "fragment_retries": 3,
+        "socket_timeout": 60,
+        "retries": 10,
+        "fragment_retries": 10,
+        "file_access_retries": 5,
+        "retry_sleep": 2,
+        "buffersize": "1024",
+        "concurrent_fragment_downloads": 4,
         "js_runtimes": {"node": {}},              # YouTube JS 签名解析
         "geo_bypass": True,                        # 绕过地理限制
         "remote_components": ["ejs:github"],       # 下载远程 EJS 挑战脚本
+        "extractor_retries": 3,                    # 提取器重试
     }
 
     if COOKIE_FILE.exists():
