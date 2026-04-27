@@ -712,6 +712,122 @@ header p {
   background: rgba(239, 68, 68, 0.3);
   border-color: var(--error);
 }
+
+/* Path Manager */
+.path-manager-btn {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+  transition: all 0.3s ease;
+  z-index: 100;
+}
+.path-manager-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 8px 30px rgba(99, 102, 241, 0.6);
+}
+.path-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+.path-modal.hidden { display: none; }
+.path-modal-content {
+  width: 500px;
+  max-width: 90vw;
+  max-height: 80vh;
+  background: var(--glass-bg);
+  backdrop-filter: blur(30px);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  padding: 32px;
+  overflow-y: auto;
+}
+.path-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 24px;
+}
+.path-modal-header h3 {
+  font-size: 1.3rem;
+  background: linear-gradient(135deg, #fff, var(--primary-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.path-close-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 1px solid var(--glass-border);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 18px;
+}
+.path-list { margin-bottom: 20px; }
+.path-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: rgba(0,0,0,0.2);
+  border-radius: 12px;
+  margin-bottom: 8px;
+}
+.path-item-icon { font-size: 24px; }
+.path-item-info { flex: 1; }
+.path-item-name { font-weight: 600; font-size: 0.95rem; }
+.path-item-path { font-size: 0.8rem; color: var(--text-dim); word-break: break-all; }
+.path-delete-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--error);
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.path-delete-btn:hover { background: rgba(239, 68, 68, 0.2); }
+.path-add-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--glass-border);
+}
+.path-add-form h4 {
+  font-size: 1rem;
+  color: var(--text-dim);
+}
+.path-input-row {
+  display: flex;
+  gap: 8px;
+}
+.path-input-row input {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0,0,0,0.3);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+.path-input-row input::placeholder { color: var(--text-dim); }
+
 </style>
 </head>
 <body>
@@ -1152,8 +1268,24 @@ function updateTaskUI(taskId) {
   }
 }
 
+
+// Load move paths
+async function loadMovePaths() {
+  try {
+    const res = await authFetch(`${API}/api/paths`);
+    MOVE_PATHS = await res.json();
+  } catch (e) {
+    // Fallback to defaults
+    MOVE_PATHS = [
+      {id: '115', name: '115网盘', path: '/Movies/CloudDrive/115/youtube', icon: '💾'},
+      {id: 'baidu', name: '百度网盘', path: '/Movies/CloudDrive/百度网盘', icon: '📀'}
+    ];
+  }
+}
+
 // Load tasks
 async function loadTasks() {
+  await loadMovePaths();  // Load paths first
   try {
     const res = await authFetch(`${API}/api/tasks`);
     const data = await res.json();
@@ -1210,8 +1342,7 @@ function renderTasks(tasks) {
           ${task.status === 'error' ? `<div style="color: var(--error); font-size: 0.85rem; margin-top: 8px;">⚠ ${task.error || '未知错误'}</div>` : ''}
           <div class="task-actions" style="margin-top: 8px;">
             ${task.status === 'done' ? `
-              <button class="btn btn-sm btn-success" onclick="moveFile('${task.task_id}', '115')">📦 移动到 115</button>
-              <button class="btn btn-sm btn-success" onclick="moveFile('${task.task_id}', 'baidu')">📦 移动到百度网盘</button>
+              ${MOVE_PATHS.map(p => `<button class="btn btn-sm btn-success" onclick="moveFile('${task.task_id}', '${p.path}', '${p.name.replace("'", "\\'")}')">${p.icon || '📦'} 移动到 ${p.name}</button>`).join('')}
             ` : ''}
             ${task.status === 'moved' ? `<span style="color: var(--success); font-size: 0.85rem;">✓ ${task.cloud_path || ''}</span>` : ''}
             <button class="btn btn-sm btn-danger" onclick="deleteTask('${task.task_id}')">🗑 删除</button>
@@ -1223,15 +1354,14 @@ function renderTasks(tasks) {
 }
 
 // Move file
-async function moveFile(taskId, target) {
-  const targetLabels = { '115': '115网盘', 'baidu': '百度网盘' };
-  showToast(`正在移动到 ${targetLabels[target]}...`, 'info');
+async function moveFile(taskId, targetPath, targetName) {
+  showToast(`正在移动到 ${targetName || targetPath}...`, 'info');
 
   try {
     const res = await authFetch(`${API}/api/move`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_id: taskId, target }),
+      body: JSON.stringify({ task_id: taskId, target_path: targetPath, target_name: targetName }),
     });
     const data = await res.json();
     if (data.success) {
@@ -1300,8 +1430,7 @@ function renderFiles(files) {
       </div>
       <div class="file-actions">
         ${!f.cloud_path ? `
-          <button class="btn btn-sm btn-success" onclick="moveFile('${f.task_id}', '115')">📦 115</button>
-          <button class="btn btn-sm btn-success" onclick="moveFile('${f.task_id}', 'baidu')">📦 百度网盘</button>
+          ${MOVE_PATHS.map(p => `<button class="btn btn-sm btn-success" onclick="moveFile('${f.task_id}', '${p.path}', '${p.name.replace("'", "\\'")}')">${p.icon || '📦'} ${p.name}</button>`).join('')}
         ` : ''}
         <button class="btn btn-sm btn-danger" onclick="deleteTask('${f.task_id}')">🗑</button>
       </div>
@@ -1359,6 +1488,110 @@ loadFiles();
 
 // Refresh tasks every 10 seconds
 setInterval(loadTasks, 10000);
+
+// Path Manager Functions
+function togglePathModal() {
+  const modal = document.getElementById('pathModal');
+  modal.classList.toggle('hidden');
+  if (!modal.classList.contains('hidden')) {
+    renderPathList();
+  }
+}
+
+function renderPathList() {
+  const container = document.getElementById('pathList');
+  if (MOVE_PATHS.length === 0) {
+    container.innerHTML = '<div style="color: var(--text-dim); text-align: center; padding: 20px;">暂无路径配置</div>';
+    return;
+  }
+  container.innerHTML = MOVE_PATHS.map(p => `
+    <div class="path-item">
+      <div class="path-item-icon">${p.icon || '📁'}</div>
+      <div class="path-item-info">
+        <div class="path-item-name">${p.name}</div>
+        <div class="path-item-path">${p.path}</div>
+      </div>
+      <button class="path-delete-btn" onclick="deletePath('${p.id}')">删除</button>
+    </div>
+  `).join('');
+}
+
+async function addPath() {
+  const nameInput = document.getElementById('pathName');
+  const pathInput = document.getElementById('pathValue');
+  const name = nameInput.value.trim();
+  const path = pathInput.value.trim();
+  
+  if (!name || !path) {
+    showToast('请填写名称和路径', 'error');
+    return;
+  }
+  
+  const id = 'path_' + Date.now();
+  const icon = '📁';
+  
+  try {
+    const res = await authFetch(`${API}/api/paths`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, name, path, icon }),
+    });
+    
+    if (res.ok) {
+      showToast('路径已添加', 'success');
+      nameInput.value = '';
+      pathInput.value = '';
+      await loadMovePaths();
+      renderPathList();
+      loadTasks();  // Refresh task buttons
+      loadFiles();  // Refresh file buttons
+    } else {
+      const err = await res.json();
+      showToast(err.detail || '添加失败', 'error');
+    }
+  } catch (e) {
+    showToast('添加失败: ' + e.message, 'error');
+  }
+}
+
+async function deletePath(pathId) {
+  if (!confirm('确定删除此路径？')) return;
+  
+  try {
+    const res = await authFetch(`${API}/api/paths/${pathId}`, { method: 'DELETE' });
+    if (res.ok) {
+      showToast('路径已删除', 'info');
+      await loadMovePaths();
+      renderPathList();
+      loadTasks();
+      loadFiles();
+    }
+  } catch (e) {
+    showToast('删除失败', 'error');
+  }
+}
+
 </script>
+
+<!-- Path Manager -->
+<button class="path-manager-btn" onclick="togglePathModal()" title="管理转存路径">⚙️</button>
+<div class="path-modal hidden" id="pathModal">
+  <div class="path-modal-content">
+    <div class="path-modal-header">
+      <h3>🗂️ 管理转存路径</h3>
+      <button class="path-close-btn" onclick="togglePathModal()">✕</button>
+    </div>
+    <div class="path-list" id="pathList"></div>
+    <div class="path-add-form">
+      <h4>➕ 添加新路径</h4>
+      <div class="path-input-row">
+        <input type="text" id="pathName" placeholder="名称 (如: 阿里云盘)" style="max-width: 120px;" />
+        <input type="text" id="pathValue" placeholder="完整路径 (如: /Movies/CloudDrive/aliyun)" />
+        <button class="btn btn-sm btn-primary" onclick="addPath()">添加</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>

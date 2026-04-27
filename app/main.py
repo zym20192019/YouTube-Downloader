@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from app.models import (
     DownloadRequest, MoveRequest, TaskResponse, TaskListResponse,
-    MoveResponse, FileItem, TaskStatus, DownloadFormat
+    MoveResponse, FileItem, TaskStatus, DownloadFormat, CloudPath
 )
 from app.tasks import task_manager
 from app.downloader import download_video, move_to_cloud_drive, DOWNLOAD_DIR, COOKIE_FILE
@@ -49,6 +49,36 @@ async def auth_middleware(request: Request, call_next):
     return await call_next(request)
 
 app.middleware("http")(auth_middleware)
+
+
+@app.get("/api/paths", response_model=list[CloudPath])
+async def get_paths():
+    """Get configured custom paths."""
+    return load_path_config()
+
+
+@app.post("/api/paths", response_model=CloudPath)
+async def add_path(req: CloudPath):
+    """Add a new custom path."""
+    paths = load_path_config()
+    # Check if path already exists
+    for p in paths:
+        if p["path"] == req.path:
+            raise HTTPException(status_code=400, detail="Path already exists")
+    paths.append(req.model_dump())
+    save_path_config(paths)
+    return req
+
+
+@app.delete("/api/paths/{path_id}")
+async def delete_path(path_id: str):
+    """Delete a custom path by ID."""
+    paths = load_path_config()
+    new_paths = [p for p in paths if p["id"] != path_id]
+    if len(new_paths) == len(paths):
+        raise HTTPException(status_code=404, detail="Path not found")
+    save_path_config(new_paths)
+    return {"success": True}
 
 
 # Mount static files
@@ -149,7 +179,7 @@ async def move_file(req: MoveRequest):
     if not task.get("filepath"):
         raise HTTPException(status_code=400, detail="No file to move")
 
-    result = await move_to_cloud_drive(req.task_id, req.target.value)
+    result = await move_to_cloud_drive(req.task_id, req.target_path, req.target_name)
     if not result:
         raise HTTPException(status_code=500, detail="Failed to move file")
 
@@ -159,7 +189,7 @@ async def move_file(req: MoveRequest):
         task_id=req.task_id,
         original_path=src,
         new_path=dest,
-        target=req.target.value,
+        target=req.target_name or req.target_path,
     )
 
 

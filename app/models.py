@@ -10,20 +10,23 @@ class DownloadFormat(str, Enum):
     BEST = "best"
 
 
-class CloudDriveTarget(str, Enum):
-    DRIVE_115 = "115"
-    BAIDU = "baidu"
-
-
 class DownloadRequest(BaseModel):
     url: str = Field(..., description="YouTube video URL")
     format: DownloadFormat = Field(default=DownloadFormat.BEST, description="Download format")
     quality: Optional[str] = Field(default=None, description="Quality preference (e.g. '1080p', '720p')")
 
 
+class CloudPath(BaseModel):
+    id: str = Field(..., description="Path ID")
+    name: str = Field(..., description="Display name (e.g. '115网盘')")
+    path: str = Field(..., description="Full path (e.g. '/Movies/CloudDrive/115/youtube')")
+    icon: Optional[str] = Field(default="📁", description="Icon emoji")
+
+
 class MoveRequest(BaseModel):
     task_id: str = Field(..., description="Task ID")
-    target: CloudDriveTarget = Field(..., description="Cloud drive target")
+    target_path: str = Field(..., description="Target directory path")
+    target_name: Optional[str] = Field(default=None, description="Target display name")
 
 
 class TaskStatus(str, Enum):

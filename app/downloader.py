@@ -168,8 +168,8 @@ async def download_video(task_id: str, url: str, fmt: DownloadFormat, quality: O
             task_manager.set_error(task_id, "Download completed but file not found")
 
 
-async def move_to_cloud_drive(task_id: str, target: str) -> Optional[tuple]:
-    """Move downloaded file to cloud drive directory.
+async def move_to_cloud_drive(task_id: str, target_path: str, target_name: Optional[str] = None) -> Optional[tuple]:
+    """Move downloaded file to custom directory.
     
     Uses cp + verify + rm for FUSE-based CloudDrive mounts (shutil.move is unreliable).
     """
@@ -181,10 +181,7 @@ async def move_to_cloud_drive(task_id: str, target: str) -> Optional[tuple]:
     if not os.path.exists(src):
         return None
 
-    if target == "115":
-        dest_dir = "/Movies/CloudDrive/115/youtube"
-    else:
-        dest_dir = "/Movies/CloudDrive/百度网盘"
+    dest_dir = target_path
 
     os.makedirs(dest_dir, exist_ok=True)
     dest = os.path.join(dest_dir, os.path.basename(src))
