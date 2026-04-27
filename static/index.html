@@ -596,6 +596,15 @@ header p {
   box-shadow: 0 0 20px rgba(99, 102, 241, 0.2), var(--shadow);
 }
 
+/* Current video in playlist */
+.current-video {
+  animation: currentVideoPulse 2s ease-in-out infinite;
+}
+@keyframes currentVideoPulse {
+  0%, 100% { border-left-color: var(--primary); }
+  50% { border-left-color: var(--accent); }
+}
+
 /* Thumbnail Toggle */
 .thumbnail-toggle {
   display: flex;
@@ -938,6 +947,27 @@ header p {
         <div class="empty-state">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
           <p>还没有下载任务，粘贴链接开始吧</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlist Details View (hidden by default) -->
+  <div class="tab-content" id="playlistDetailsTab" style="display: none;">
+    <div class="glass">
+      <div class="section-header">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <button class="btn btn-sm" onclick="backToTaskList()" style="padding: 6px 12px;">← 返回</button>
+          <div>
+            <h2 id="playlistDetailTitle" style="margin: 0; font-size: 1.2rem;">播放列表详情</h2>
+            <div id="playlistDetailMeta" style="font-size: 0.85rem; color: var(--text-dim);"></div>
+          </div>
+        </div>
+        <span class="count" id="playlistChildCount">0 个子任务</span>
+      </div>
+      <div id="playlistChildList">
+        <div class="empty-state">
+          <p>加载中...</p>
         </div>
       </div>
     </div>
@@ -1498,6 +1528,9 @@ function renderTasks(tasks) {
                 `;
             }
 
+            // View details button for playlists
+            const viewDetailsBtn = isPlaylist ? `<button class="btn btn-sm btn-primary" onclick="viewPlaylistDetails('${taskId}')">👁️ 查看详情</button>` : '';
+
             return `
             <div class="task-item ${status === 'downloading' ? 'glow-active' : ''}" data-task-id="${taskId}">
                 <div class="task-item-with-thumb">
@@ -1522,6 +1555,7 @@ function renderTasks(tasks) {
                         ${playlistUI}
                         ${status === 'error' ? `<div style="color: var(--error); font-size: 0.85rem; margin-top: 8px;">⚠ ${error}</div>` : ''}
                         <div class="task-actions" style="margin-top: 8px;">
+                            ${viewDetailsBtn}
                             ${moveButtons}
                             <button class="btn btn-sm btn-danger" onclick="deleteTask('${taskId}')">🗑 删除</button>
                         </div>
@@ -1575,6 +1609,119 @@ async function deleteTask(taskId) {
   } catch (e) {
     showToast('删除失败', 'error');
   }
+}
+
+// Playlist details view
+let currentPlaylistId = null;
+let playlistRefreshInterval = null;
+
+async function viewPlaylistDetails(playlistId) {
+  currentPlaylistId = playlistId;
+  
+  // Switch to playlist details view
+  document.getElementById('tasksTab').style.display = 'none';
+  document.getElementById('playlistDetailsTab').style.display = 'block';
+  
+  // Load playlist details
+  await loadPlaylistDetails(playlistId);
+  
+  // Start auto-refresh for active playlists
+  if (playlistRefreshInterval) clearInterval(playlistRefreshInterval);
+  playlistRefreshInterval = setInterval(async () => {
+    const task = TASKS[playlistId];
+    if (task && ['queued', 'downloading'].includes(task.status)) {
+      await loadPlaylistDetails(playlistId);
+    } else {
+      clearInterval(playlistRefreshInterval);
+    }
+  }, 3000);
+}
+
+async function loadPlaylistDetails(playlistId) {
+  try {
+    const res = await authFetch(`${API}/api/playlist/${playlistId}/tasks`);
+    if (!res) return;
+    const data = await res.json();
+    
+    // Update header
+    document.getElementById('playlistDetailTitle').textContent = data.playlist.title || '播放列表';
+    document.getElementById('playlistDetailMeta').textContent = `${data.playlist.url} · ${data.total} 个视频`;
+    document.getElementById('playlistChildCount').textContent = `${data.total} 个子任务`;
+    
+    // Render child tasks
+    renderPlaylistChildren(data.children, data.playlist.playlist_progress || {current: 0, total: 0});
+  } catch (e) {
+    console.error('Failed to load playlist details:', e);
+  }
+}
+
+function renderPlaylistChildren(children, playlistProgress) {
+  const container = document.getElementById('playlistChildList');
+  
+  if (!children || children.length === 0) {
+    container.innerHTML = `<div class="empty-state"><p>暂无子任务</p></div>`;
+    return;
+  }
+  
+  const html = children.map((task, index) => {
+    const status = task.status || 'queued';
+    const title = task.title || `视频 ${index + 1}`;
+    const progress = task.progress || 0;
+    const speed = task.speed || '';
+    const eta = task.eta || '';
+    const error = task.error || '';
+    const statusLabels = {queued:'排队中',downloading:'下载中',done:'已完成',error:'失败',moving:'移动中',moved:'已转存'};
+    const statusLabel = statusLabels[status] || status;
+    
+    // Check if this is the currently downloading video
+    const isCurrentVideo = playlistProgress && playlistProgress.current === index;
+    
+    return `
+      <div class="task-item ${status === 'downloading' ? 'glow-active' : ''} ${isCurrentVideo ? 'current-video' : ''}" 
+           style="margin-bottom: 8px; border-left: ${isCurrentVideo ? '3px solid var(--primary)' : '3px solid transparent'};">
+        <div class="task-content">
+          <div class="task-header">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color: var(--text-dim); min-width: 30px;">#${index + 1}</span>
+              <div class="task-title">${title}</div>
+              ${isCurrentVideo ? '<span style="font-size: 0.75rem; color: var(--primary);">⬇ 正在下载</span>' : ''}
+            </div>
+            <span class="status-badge ${status}">${statusLabel}</span>
+          </div>
+          ${status === 'downloading' ? `
+            <div class="progress-container" style="margin: 8px 0">
+              <div class="progress-bar"><div class="progress-fill" style="width: ${progress}%"></div></div>
+              <div class="progress-info">
+                <span class="progress-pct">${progress.toFixed(1)}%</span>
+                <span class="progress-speed">${speed}</span>
+                <span>${eta}</span>
+              </div>
+            </div>
+          ` : ''}
+          ${status === 'done' ? `
+            <div style="font-size: 0.8rem; color: var(--success); margin-top: 4px;">
+              ✓ ${task.filename || '已下载'}
+            </div>
+          ` : ''}
+          ${status === 'error' ? `
+            <div style="color: var(--error); font-size: 0.85rem; margin-top: 4px;">⚠ ${error}</div>
+          ` : ''}
+        </div>
+      </div>
+    `;
+  }).join('');
+  
+  container.innerHTML = html;
+}
+
+function backToTaskList() {
+  if (playlistRefreshInterval) clearInterval(playlistRefreshInterval);
+  currentPlaylistId = null;
+  
+  document.getElementById('playlistDetailsTab').style.display = 'none';
+  document.getElementById('tasksTab').style.display = 'block';
+  
+  loadTasks();
 }
 
 // Load files

@@ -208,6 +208,22 @@ async def get_playlist_info(url: str):
     return result
 
 
+@app.get("/api/playlist/{playlist_id}/tasks")
+async def get_playlist_tasks(playlist_id: str):
+    """Get all child tasks for a playlist, including their individual download status."""
+    parent_task = task_manager.get_task(playlist_id)
+    if not parent_task:
+        raise HTTPException(status_code=404, detail="Playlist task not found")
+    
+    child_tasks = task_manager.get_child_tasks(playlist_id)
+    
+    return {
+        "playlist": parent_task,
+        "children": child_tasks,
+        "total": len(child_tasks),
+    }
+
+
 @app.get("/api/tasks", response_model=TaskListResponse)
 async def list_tasks():
     tasks = task_manager.list_tasks()

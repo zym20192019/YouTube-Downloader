@@ -241,6 +241,14 @@ class TaskManager:
             message=error,
         ))
 
+    def get_child_tasks(self, parent_id: str) -> List[dict]:
+        """Get all child tasks for a playlist."""
+        with self._lock:
+            return sorted(
+                [t for t in self.tasks.values() if t.get("parent_id") == parent_id],
+                key=lambda t: t["task_id"],
+            )
+
     def _notify(self, task_id: str, message: ProgressMessage):
         with self._lock:
             for callback in self.subscribers.get(task_id, []):
