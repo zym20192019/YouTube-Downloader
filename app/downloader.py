@@ -176,6 +176,81 @@ async def download_video(task_id: str, url: str, fmt: DownloadFormat, quality: O
             task_manager.set_error(task_id, "Download completed but file not found")
 
 
+async def download_playlist(playlist_id: str, url: str, fmt: DownloadFormat, quality: Optional[str] = None, hdr: Optional[str] = None):
+    """Download all videos in a playlist. Creates a parent task with child tasks."""
+    task_manager.update_task(playlist_id, status="downloading")
+
+    loop = asyncio.get_event_loop()
+    ydl_opts = _get_ydl_opts(playlist_id, fmt, quality, hdr)
+    ydl_opts["noplaylist"] = False  # Enable playlist download
+
+    def _extract_playlist():
+        try:
+            with yt_dlp.YoutubeDL({**ydl_opts, "quiet": True, "no_warnings": True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info.get("_type") == "playlist":
+                    return {
+                        "title": info.get("title", "Unknown Playlist"),
+                        "thumbnail": info.get("thumbnail"),
+                        "entries": [
+                            {
+                                "id": e.get("id"),
+                                "title": e.get("title", "Unknown"),
+                                "url": e.get("webpage_url") or f"https://www.youtube.com/watch?v={e.get('id')}",
+                                "duration": e.get("duration"),
+                                "thumbnail": e.get("thumbnail"),
+                            }
+                            for e in info.get("entries", [])
+                            if e and e.get("id")
+                        ]
+                    }
+                else:
+                    # Single video, not a playlist
+                    return None
+        except Exception as e:
+            task_manager.set_error(playlist_id, str(e))
+            return None
+
+    playlist_info = await loop.run_in_executor(None, _extract_playlist)
+
+    if not playlist_info:
+        task_manager.set_error(playlist_id, "Not a valid playlist or extraction failed")
+        return
+
+    task_manager.set_playlist_info(playlist_id, playlist_info)
+
+    # Create child tasks and download them sequentially
+    total = len(playlist_info["entries"])
+    task_manager.set_playlist_progress(playlist_id, 0, total)
+
+    for i, entry in enumerate(playlist_info["entries"]):
+        child_id = f"{playlist_id}_{i}"
+        task_manager.create_child_task(child_id, playlist_id, entry["url"], entry["title"], fmt, quality)
+
+        # Download this video
+        child_opts = _get_ydl_opts(child_id, fmt, quality, hdr)
+        def _download_single():
+            try:
+                with yt_dlp.YoutubeDL(child_opts) as ydl:
+                    ydl.download([entry["url"]])
+            except Exception as e:
+                task_manager.set_child_error(child_id, str(e))
+                return False
+            return True
+
+        success = await loop.run_in_executor(None, _download_single)
+        if success:
+            result = _find_downloaded_file(child_id)
+            if result:
+                filename, filepath, filesize = result
+                task_manager.set_child_done(child_id, filename, filepath, filesize)
+        
+        # Update playlist progress
+        task_manager.set_playlist_progress(playlist_id, i + 1, total)
+
+    task_manager.set_playlist_done(playlist_id)
+
+
 async def move_to_cloud_drive(task_id: str, target_path: str, target_name: Optional[str] = None) -> Optional[tuple]:
     """Move downloaded file to custom directory.
     

@@ -157,6 +157,57 @@ async def create_download(req: DownloadRequest):
     return TaskResponse(**task)
 
 
+@app.post("/api/playlist/download", response_model=TaskResponse)
+async def create_playlist_download(req: DownloadRequest):
+    """Start downloading a playlist. Creates a parent task with child tasks for each video."""
+    from app.downloader import download_playlist
+
+    task_id = task_manager.create_playlist_task(req.url, req.format, req.quality)
+
+    # Start playlist download in background
+    asyncio.create_task(
+        download_playlist(task_id, req.url, req.format, req.quality, req.hdr)
+    )
+
+    task = task_manager.get_task(task_id)
+    return TaskResponse(**task)
+
+
+@app.get("/api/playlist/info")
+async def get_playlist_info(url: str):
+    """Extract playlist information without downloading."""
+    import yt_dlp
+
+    def _extract():
+        try:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info.get("_type") == "playlist":
+                    entries = info.get("entries", [])
+                    return {
+                        "title": info.get("title", "Unknown Playlist"),
+                        "thumbnail": info.get("thumbnail"),
+                        "count": len(entries),
+                        "uploader": info.get("uploader"),
+                        "entries": [
+                            {
+                                "id": e.get("id"),
+                                "title": e.get("title", "Unknown"),
+                                "url": e.get("url") or e.get("webpage_url") or f"https://www.youtube.com/watch?v={e.get('id')}",
+                                "duration": e.get("duration"),
+                            }
+                            for e in entries[:50]  # Limit to first 50 for preview
+                        ]
+                    }
+                return None
+        except Exception as e:
+            return {"error": str(e)}
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _extract)
+    return result
+
+
 @app.get("/api/tasks", response_model=TaskListResponse)
 async def list_tasks():
     tasks = task_manager.list_tasks()
