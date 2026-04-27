@@ -127,19 +127,29 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
 
 
 def _find_downloaded_file(task_id: str) -> Optional[tuple]:
-    """Find the most recently created file in downloads dir for this task."""
+    """Find the downloaded file in downloads dir, match by video ID in filename."""
     task = task_manager.get_task(task_id)
     if not task:
         return None
 
-    files = []
-    for f in DOWNLOAD_DIR.iterdir():
-        if f.is_file() and f.stat().st_mtime > datetime_to_timestamp(task["created_at"]):
-            files.append((f, f.stat().st_mtime))
+    # Extract video ID from URL
+    url = task.get("url", "")
+    video_id = None
+    if "watch?v=" in url:
+        video_id = url.split("watch?v=")[1].split("&")[0]
+    elif "youtu.be/" in url:
+        video_id = url.split("youtu.be/")[1].split("?")[0]
 
+    if video_id:
+        # Find file containing video ID in its name
+        for f in DOWNLOAD_DIR.iterdir():
+            if f.is_file() and video_id in f.name:
+                return (f.name, str(f), f.stat().st_size)
+
+    # Fallback: most recent file
+    files = [(f, f.stat().st_mtime) for f in DOWNLOAD_DIR.iterdir() if f.is_file()]
     if not files:
         return None
-
     files.sort(key=lambda x: x[1], reverse=True)
     latest = files[0][0]
     return (latest.name, str(latest), latest.stat().st_size)

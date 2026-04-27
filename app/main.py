@@ -44,7 +44,7 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Zym@qwe123"
 ACTIVE_TOKENS: dict[str, str] = {}  # token -> username
 
-AUTH_WHITELIST = {"/", "/api/login", "/api/health", "/favicon.ico"}
+AUTH_WHITELIST = {"/api/login", "/api/health", "/favicon.ico"}
 
 def get_token(request: Request) -> str:
     """Extract and validate bearer token."""
