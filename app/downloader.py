@@ -68,11 +68,11 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
             "preferedformat": "mp4",
         }]
 
-    # HDR preference: add HDR format preferences
+    # HDR preference: try HDR formats first, fall back to normal
     if hdr == "hdr" and fmt != DownloadFormat.AUDIO:
-        # Prefer HDR formats (VP9.2/AV1 with HDR, or bt2020 color primaries)
-        hdr_formats = "bestvideo[dynamicrange=hdr]+bestvideo[vcodec^=av1]+bestvideo[vcodec^=vp9.2]"
-        format_spec = f"{hdr_formats}+bestaudio/best/{format_spec}"
+        # Prefer HDR formats (dynamicrange=hdr or bt2020 color primaries)
+        # Use "/" for fallback: try HDR first, if not available use normal
+        format_spec = f"bestvideo[dynamicrange=hdr]+bestaudio/bestvideo[height<=4320][color_primaries=bt2020]+bestaudio/best/{format_spec}"
 
     def progress_hook(d: dict):
         if d["status"] == "downloading":

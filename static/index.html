@@ -995,7 +995,7 @@ header p {
 
 <script>
 let selectedFormat = 'best';
-let hdrEnabled = false;
+let hdrEnabled = localStorage.getItem('yt_dl_hdr') === 'true';
 const API = '';
 const TASKS = {};
 const WS_CONNECTIONS = {};
@@ -1105,6 +1105,12 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     }).catch(() => {});
   }
+  // Initialize HDR button state
+  const hdrBtn = document.getElementById('hdrBtn');
+  if (hdrBtn) {
+    hdrBtn.classList.toggle('active', hdrEnabled);
+    hdrBtn.textContent = hdrEnabled ? 'HDR 开启' : 'HDR 关闭';
+  }
 });
 
 // Auth wrapper for fetch
@@ -1132,6 +1138,7 @@ function setFormat(fmt, btn) {
 // HDR toggle
 function toggleHDR(btn) {
   hdrEnabled = !hdrEnabled;
+  localStorage.setItem('yt_dl_hdr', hdrEnabled ? 'true' : 'false');
   btn.classList.toggle('active', hdrEnabled);
   btn.textContent = hdrEnabled ? 'HDR 开启' : 'HDR 关闭';
 }
