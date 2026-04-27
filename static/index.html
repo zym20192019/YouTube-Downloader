@@ -840,6 +840,8 @@ header p {
   font-weight: 500;
   cursor: pointer;
   transition: all 0.3s ease;
+  margin-left: 4px;
+  margin-right: 4px;
 }
 .hdr-btn:hover {
   background: var(--glass-bg);
@@ -915,8 +917,8 @@ header p {
           <option value="1080">1080p</option>
           <option value="720">720p</option>
         </select>
-        <button class="hdr-btn" id="hdrBtn" onclick="toggleHDR(this)">HDR 关闭</button>
-        <button class="btn btn-primary" id="downloadBtn" onclick="startDownload()">
+        <button type="button" class="hdr-btn" id="hdrBtn" onclick="toggleHDR(event, this)">HDR 关闭</button>
+        <button type="button" class="btn btn-primary" id="downloadBtn" onclick="startDownload(event)">
           <span>⬇</span> 下载
         </button>
       </div>
@@ -1136,7 +1138,8 @@ function setFormat(fmt, btn) {
 }
 
 // HDR toggle
-function toggleHDR(btn) {
+function toggleHDR(event, btn) {
+  event.stopPropagation();
   hdrEnabled = !hdrEnabled;
   localStorage.setItem('yt_dl_hdr', hdrEnabled ? 'true' : 'false');
   btn.classList.toggle('active', hdrEnabled);
@@ -1180,7 +1183,8 @@ function formatDuration(seconds) {
 }
 
 // Start download
-async function startDownload() {
+async function startDownload(event) {
+  event.stopPropagation();
   const url = document.getElementById('urlInput').value.trim();
   if (!url) { showToast('请输入 YouTube 链接', 'error'); return; }
 
