@@ -61,8 +61,14 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
             "key": "FFmpegVideoRemuxer",
             "preferedformat": "mp4",
         }]
-    else:  # best — always prefer HDR when available
-        format_spec = "bestvideo[dynamicrange=hdr]+bestaudio/bestvideo[height<=4320][color_primaries=bt2020]+bestaudio/bestvideo+bestaudio/best"
+    else:  # best — 8K HDR → 4K HDR → 8K → 最高画质
+        format_spec = (
+            "bestvideo[height<=4320][dynamicrange=hdr]+bestaudio/"
+            "bestvideo[height<=4320][color_primaries=bt2020]+bestaudio/"
+            "bestvideo[height<=4320][dynamicrange=sdr]+bestaudio/"
+            "bestvideo[height<=4320]+bestaudio/"
+            "bestvideo+bestaudio/best"
+        )
         postprocessors = [{
             "key": "FFmpegVideoRemuxer",
             "preferedformat": "mp4",
