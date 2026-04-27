@@ -1,0 +1,1364 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>YouTube Downloader — Liquid Glass</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --primary: #6366f1;
+  --primary-light: #818cf8;
+  --accent: #a855f7;
+  --accent-light: #c084fc;
+  --success: #22c55e;
+  --error: #ef4444;
+  --warning: #f59e0b;
+  --glass-bg: rgba(255, 255, 255, 0.06);
+  --glass-border: rgba(255, 255, 255, 0.12);
+  --glass-hover: rgba(255, 255, 255, 0.1);
+  --text: #f1f5f9;
+  --text-dim: #94a3b8;
+  --radius: 20px;
+  --shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', Roboto, sans-serif;
+  background: linear-gradient(135deg, #1a0533 0%, #0c1445 50%, #1e1b4b 100%);
+  min-height: 100vh;
+  color: var(--text);
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Login Screen */
+.login-screen {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #1a0533 0%, #0c1445 50%, #1e1b4b 100%);
+  transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+.login-screen.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.login-card {
+  width: 380px;
+  padding: 40px 32px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border: 1px solid var(--glass-border);
+  border-radius: 24px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+  text-align: center;
+}
+.login-card h2 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #fff, var(--primary-light), var(--accent-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+.login-card .subtitle {
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  margin-bottom: 28px;
+}
+.login-field {
+  width: 100%;
+  padding: 14px 18px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font-size: 1rem;
+  outline: none;
+  margin-bottom: 14px;
+  transition: all 0.3s ease;
+}
+.login-field:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+.login-field::placeholder { color: var(--text-dim); }
+.login-btn {
+  width: 100%;
+  padding: 14px;
+  border: none;
+  border-radius: 14px;
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+}
+.login-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(99, 102, 241, 0.5);
+}
+.login-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+.login-error {
+  color: var(--error);
+  font-size: 0.85rem;
+  margin-top: 12px;
+  min-height: 20px;
+}
+
+/* Animated gradient orbs */
+.orb {
+  position: fixed;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+  animation: float 20s ease-in-out infinite;
+  pointer-events: none;
+  z-index: 0;
+}
+.orb-1 {
+  width: 400px; height: 400px;
+  background: radial-gradient(circle, var(--primary), transparent 70%);
+  top: -100px; left: -100px;
+  animation-delay: 0s;
+}
+.orb-2 {
+  width: 350px; height: 350px;
+  background: radial-gradient(circle, var(--accent), transparent 70%);
+  bottom: -80px; right: -80px;
+  animation-delay: -7s;
+  animation-duration: 25s;
+}
+.orb-3 {
+  width: 250px; height: 250px;
+  background: radial-gradient(circle, #06b6d4, transparent 70%);
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  animation-delay: -14s;
+  animation-duration: 30s;
+}
+
+@keyframes float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  25% { transform: translate(50px, -30px) scale(1.1); }
+  50% { transform: translate(-30px, 50px) scale(0.9); }
+  75% { transform: translate(30px, 30px) scale(1.05); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Container */
+.container {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 40px 20px;
+  position: relative;
+  z-index: 1;
+}
+
+/* Header */
+header {
+  text-align: center;
+  margin-bottom: 40px;
+}
+header h1 {
+  font-size: 2.5rem;
+  font-weight: 700;
+  background: linear-gradient(135deg, #fff, var(--primary-light), var(--accent-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  margin-bottom: 8px;
+}
+header p {
+  color: var(--text-dim);
+  font-size: 1rem;
+}
+
+/* Glass Card */
+.glass {
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 24px;
+  margin-bottom: 24px;
+  transition: all 0.3s ease;
+}
+.glass:hover {
+  background: var(--glass-hover);
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+/* Input Section */
+.input-section { display: flex; flex-direction: column; gap: 16px; }
+.input-row { display: flex; gap: 12px; }
+.input-row input[type="text"] {
+  flex: 1;
+  padding: 14px 20px;
+  border-radius: 14px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font-size: 1rem;
+  outline: none;
+  transition: all 0.3s ease;
+}
+.input-row input[type="text"]:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+.input-row input[type="text"]::placeholder { color: var(--text-dim); }
+
+/* Format Toggle */
+.format-toggle {
+  display: flex;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: 12px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+}
+.format-btn {
+  flex: 1;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.format-btn.active {
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+}
+.format-btn:hover:not(.active) { color: var(--text); }
+
+/* Quality Select */
+.quality-select {
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+  cursor: pointer;
+}
+.quality-select option { background: #1e1b4b; }
+
+/* Buttons */
+.btn {
+  padding: 14px 28px;
+  border: none;
+  border-radius: 14px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+.btn-primary {
+  background: linear-gradient(135deg, var(--primary), var(--accent));
+  color: white;
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4);
+}
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(99, 102, 241, 0.5);
+}
+.btn-primary:active { transform: translateY(0); }
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+.btn-sm {
+  padding: 8px 16px;
+  font-size: 0.85rem;
+  border-radius: 10px;
+}
+.btn-success {
+  background: linear-gradient(135deg, #059669, var(--success));
+  color: white;
+}
+.btn-danger {
+  background: rgba(239, 68, 68, 0.2);
+  color: var(--error);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+}
+.btn-danger:hover { background: rgba(239, 68, 68, 0.3); }
+.btn-outline {
+  background: transparent;
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+}
+.btn-outline:hover {
+  background: var(--glass-bg);
+  color: var(--text);
+}
+
+/* Progress */
+.progress-container { margin: 16px 0; }
+.progress-bar {
+  height: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--primary), var(--accent), var(--primary-light));
+  background-size: 200% 100%;
+  border-radius: 10px;
+  transition: width 0.5s ease;
+  animation: shimmer 2s linear infinite;
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.5);
+}
+.progress-info {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+
+/* Task List */
+.task-item {
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 12px;
+  transition: all 0.3s ease;
+}
+.task-item:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+.task-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.task-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 70%;
+}
+.status-badge {
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.status-badge.queued { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+.status-badge.downloading { background: rgba(99, 102, 241, 0.2); color: var(--primary-light); }
+.status-badge.done { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+.status-badge.error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+.status-badge.moving { background: rgba(168, 85, 247, 0.2); color: var(--accent-light); animation: pulse 1.5s infinite; }
+.status-badge.moved { background: rgba(34, 197, 94, 0.3); color: var(--success); }
+
+.task-url {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 12px;
+}
+.task-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* Files Section */
+.file-item {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  margin-bottom: 12px;
+  transition: all 0.3s ease;
+}
+.file-item:hover { background: rgba(0, 0, 0, 0.3); }
+.file-thumb {
+  width: 80px;
+  height: 60px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+}
+.file-info { flex: 1; min-width: 0; }
+.file-title {
+  font-weight: 600;
+  font-size: 0.9rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-meta {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-top: 4px;
+  display: flex;
+  gap: 12px;
+}
+.file-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Cookie Upload */
+.cookie-area {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 2px dashed var(--glass-border);
+  background: rgba(0, 0, 0, 0.15);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.cookie-area:hover {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.1);
+}
+.cookie-area input[type="file"] { display: none; }
+.cookie-status {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+}
+.cookie-status.active { color: var(--success); }
+
+/* Section Headers */
+.section-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.section-header h2 {
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+.section-header .count {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+
+/* Empty State */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-dim);
+}
+.empty-state svg {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  opacity: 0.3;
+}
+
+/* Loading Spinner */
+.spinner {
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: var(--primary-light);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  display: inline-block;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Toast Notifications */
+.toast-container {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.toast {
+  padding: 14px 20px;
+  border-radius: 12px;
+  background: var(--glass-bg);
+  backdrop-filter: blur(20px);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow);
+  font-size: 0.9rem;
+  animation: slideIn 0.3s ease;
+  max-width: 350px;
+}
+.toast.success { border-left: 4px solid var(--success); }
+.toast.error { border-left: 4px solid var(--error); }
+.toast.info { border-left: 4px solid var(--primary); }
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .container { padding: 20px 12px; }
+  header h1 { font-size: 1.8rem; }
+  .input-row { flex-direction: column; }
+  .file-item { flex-direction: column; align-items: flex-start; }
+  .file-thumb { width: 100%; height: 120px; }
+  .file-actions { width: 100%; }
+  .file-actions .btn { flex: 1; }
+  .task-actions { flex-direction: column; align-items: stretch; }
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 24px;
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 14px;
+  padding: 4px;
+  border: 1px solid var(--glass-border);
+}
+.tab {
+  flex: 1;
+  padding: 12px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 0.95rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.tab.active {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text);
+}
+.tab:hover:not(.active) { color: var(--text); }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Glow effect for active downloads */
+.glow-active {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.2), var(--shadow);
+}
+
+/* Thumbnail Toggle */
+.thumbnail-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 20px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  user-select: none;
+}
+.thumbnail-toggle:hover {
+  background: var(--glass-bg);
+  color: var(--text);
+}
+.thumbnail-toggle.active {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: var(--primary);
+  color: var(--primary-light);
+}
+
+/* Task with thumbnail */
+.task-item-with-thumb {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.task-thumb {
+  width: 120px;
+  height: 68px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.task-thumb:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+}
+.task-thumb.hidden { display: none; }
+.task-content { flex: 1; min-width: 0; }
+
+/* Enhanced file thumb */
+.file-thumb {
+  width: 120px;
+  height: 68px;
+  border-radius: 10px;
+  object-fit: cover;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.file-thumb:hover {
+  transform: scale(1.05);
+  box-shadow: 0 4px 20px rgba(99, 102, 241, 0.3);
+}
+.file-thumb.hidden { display: none; }
+
+/* Modal / Lightbox */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: rgba(0, 0, 0, 0.85);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  visibility: hidden;
+  transition: all 0.3s ease;
+}
+.modal-overlay.active {
+  opacity: 1;
+  visibility: visible;
+}
+.modal-content {
+  max-width: 90vw;
+  max-height: 90vh;
+  position: relative;
+}
+.modal-img {
+  max-width: 100%;
+  max-height: 85vh;
+  border-radius: 16px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.6);
+  object-fit: contain;
+}
+.modal-close {
+  position: absolute;
+  top: -40px;
+  right: 0;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  color: var(--text);
+  font-size: 1.2rem;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+}
+.modal-close:hover {
+  background: rgba(239, 68, 68, 0.3);
+  border-color: var(--error);
+}
+</style>
+</head>
+<body>
+
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+<div class="orb orb-3"></div>
+
+<div class="toast-container" id="toasts"></div>
+
+<!-- Login Screen -->
+<div class="login-screen" id="loginScreen">
+  <div class="orb orb-1"></div>
+  <div class="orb orb-2"></div>
+  <div class="orb orb-3"></div>
+  <div class="login-card">
+    <h2>YouTube Downloader</h2>
+    <p class="subtitle">Liquid Glass Edition</p>
+    <input class="login-field" type="text" id="loginUser" placeholder="用户名" autocomplete="username" />
+    <input class="login-field" type="password" id="loginPass" placeholder="密码" autocomplete="current-password" />
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">登 录</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<div class="container">
+  <header>
+    <h1>YouTube Downloader</h1>
+    <p>Liquid Glass Edition — 下载 · 管理 · 一键转存</p>
+  </header>
+
+  <!-- Download Section -->
+  <div class="glass">
+    <div class="input-section">
+      <div class="input-row">
+        <input type="text" id="urlInput" placeholder="粘贴 YouTube 视频链接..." />
+      </div>
+      <div class="input-row">
+        <div class="format-toggle">
+          <button class="format-btn active" data-format="best" onclick="setFormat('best', this)">🎬 最佳</button>
+          <button class="format-btn" data-format="video" onclick="setFormat('video', this)">📹 视频</button>
+          <button class="format-btn" data-format="audio" onclick="setFormat('audio', this)">🎵 音频</button>
+        </div>
+        <select class="quality-select" id="qualitySelect">
+          <option value="">自动质量</option>
+          <option value="2160">4K</option>
+          <option value="1080">1080p</option>
+          <option value="720">720p</option>
+        </select>
+        <button class="btn btn-primary" id="downloadBtn" onclick="startDownload()">
+          <span>⬇</span> 下载
+        </button>
+      </div>
+      <div class="input-row">
+        <label class="cookie-area" id="cookieArea">
+          <input type="file" id="cookieFile" accept=".txt" onchange="uploadCookies(this)" />
+          <span>🍪</span>
+          <span class="cookie-status" id="cookieStatus">上传 cookies.txt（可选）</span>
+        </label>
+      </div>
+    </div>
+    <div class="progress-container" id="progressContainer" style="display:none;">
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+      <div class="progress-info">
+        <span id="progressPercent">0%</span>
+        <span id="progressSpeed"></span>
+        <span id="progressEta"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="tabs" style="display: flex; align-items: center; justify-content: space-between;">
+    <div style="display: flex; gap: 4px;">
+      <button class="tab active" onclick="switchTab('tasks', this)">📋 下载队列</button>
+      <button class="tab" onclick="switchTab('files', this)">📁 已下载文件</button>
+    </div>
+    <div class="thumbnail-toggle" id="thumbnailToggle" onclick="toggleThumbnails()">
+      <span id="thumbnailIcon">👁️</span>
+      <span>缩略图</span>
+    </div>
+  </div>
+
+  <!-- Tasks Tab -->
+  <div class="tab-content active" id="tasksTab">
+    <div class="glass">
+      <div class="section-header">
+        <h2>下载任务</h2>
+        <span class="count" id="taskCount">0 个任务</span>
+      </div>
+      <div id="taskList">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+          <p>还没有下载任务，粘贴链接开始吧</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Files Tab -->
+  <div class="tab-content" id="filesTab">
+    <div class="glass">
+      <div class="section-header">
+        <h2>已下载文件</h2>
+        <span class="count" id="fileCount">0 个文件</span>
+      </div>
+      <div id="fileList">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          <p>还没有已下载的文件</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal / Lightbox -->
+<div class="modal-overlay" id="imageModal" onclick="closeModal(event)">
+  <div class="modal-content">
+    <button class="modal-close" onclick="closeModalDirect()">×</button>
+    <img class="modal-img" id="modalImg" src="" alt="Preview" />
+  </div>
+</div>
+
+<script>
+let selectedFormat = 'best';
+const API = '';
+const TASKS = {};
+const WS_CONNECTIONS = {};
+let authToken = localStorage.getItem('yt_dl_token') || '';
+let showThumbnails = localStorage.getItem('yt_dl_thumbnails') === 'true';
+
+// Initialize thumbnail toggle state on load
+function initThumbnailToggle() {
+  const toggle = document.getElementById('thumbnailToggle');
+  if (showThumbnails) {
+    toggle.classList.add('active');
+    document.getElementById('thumbnailIcon').textContent = '🖼️';
+  } else {
+    toggle.classList.remove('active');
+    document.getElementById('thumbnailIcon').textContent = '👁️';
+  }
+}
+
+function toggleThumbnails() {
+  showThumbnails = !showThumbnails;
+  localStorage.setItem('yt_dl_thumbnails', showThumbnails);
+  initThumbnailToggle();
+  loadTasks();
+  loadFiles();
+}
+
+function openModal(thumbnailUrl) {
+  if (!thumbnailUrl) return;
+  const modal = document.getElementById('imageModal');
+  const img = document.getElementById('modalImg');
+  img.src = thumbnailUrl;
+  modal.classList.add('active');
+}
+
+function closeModal(event) {
+  if (event.target === event.currentTarget) {
+    document.getElementById('imageModal').classList.remove('active');
+  }
+}
+
+function closeModalDirect() {
+  document.getElementById('imageModal').classList.remove('active');
+}
+
+// Escape key to close modal
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    document.getElementById('imageModal').classList.remove('active');
+  }
+});
+
+// Auth functions
+async function doLogin() {
+  const user = document.getElementById('loginUser').value.trim();
+  const pass = document.getElementById('loginPass').value;
+  const btn = document.getElementById('loginBtn');
+  const errEl = document.getElementById('loginError');
+
+  if (!user || !pass) { errEl.textContent = '请输入用户名和密码'; return; }
+
+  btn.disabled = true;
+  btn.textContent = '登录中...';
+  errEl.textContent = '';
+
+  try {
+    const res = await fetch(`${API}/api/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      authToken = data.token;
+      localStorage.setItem('yt_dl_token', authToken);
+      document.getElementById('loginScreen').classList.add('hidden');
+      initThumbnailToggle();
+      loadTasks();
+      loadFiles();
+    } else {
+      errEl.textContent = data.detail || '登录失败';
+    }
+  } catch (e) {
+    errEl.textContent = '连接服务器失败';
+  }
+
+  btn.disabled = false;
+  btn.textContent = '登 录';
+}
+
+// Enter key on login fields
+document.addEventListener('DOMContentLoaded', () => {
+  const loginPass = document.getElementById('loginPass');
+  if (loginPass) {
+    loginPass.addEventListener('keydown', (e) => { if (e.key === 'Enter') doLogin(); });
+  }
+  // Auto-login if token exists
+  if (authToken) {
+    fetch(`${API}/api/health`).then(res => {
+      if (res.ok) {
+        document.getElementById('loginScreen').classList.add('hidden');
+        loadTasks();
+        loadFiles();
+      } else {
+        localStorage.removeItem('yt_dl_token');
+        authToken = '';
+      }
+    }).catch(() => {});
+  }
+});
+
+// Auth wrapper for fetch
+async function authFetch(url, options = {}) {
+  if (!options.headers) options.headers = {};
+  options.headers['Authorization'] = `Bearer ${authToken}`;
+  const res = await fetch(url, options);
+  if (res.status === 401) {
+    localStorage.removeItem('yt_dl_token');
+    authToken = '';
+    document.getElementById('loginScreen').classList.remove('hidden');
+    showToast('登录已过期，请重新登录', 'error');
+    return null;
+  }
+  return res;
+}
+
+// Format selection
+function setFormat(fmt, btn) {
+  selectedFormat = fmt;
+  document.querySelectorAll('.format-btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+}
+
+// Tab switching
+function switchTab(tab, btn) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById(tab + 'Tab').classList.add('active');
+  if (tab === 'files') loadFiles();
+}
+
+// Toast notifications
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toasts');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
+// Format bytes
+function formatBytes(bytes) {
+  if (!bytes) return '未知';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
+  return bytes.toFixed(1) + units[i];
+}
+
+// Format duration
+function formatDuration(seconds) {
+  if (!seconds) return '';
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+// Start download
+async function startDownload() {
+  const url = document.getElementById('urlInput').value.trim();
+  if (!url) { showToast('请输入 YouTube 链接', 'error'); return; }
+
+  const btn = document.getElementById('downloadBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 提交中...';
+
+  try {
+    const quality = document.getElementById('qualitySelect').value;
+    const res = await authFetch(`${API}/api/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, format: selectedFormat, quality: quality || undefined }),
+    });
+    const data = await res.json();
+    showToast('下载任务已创建', 'success');
+    document.getElementById('urlInput').value = '';
+
+    // Connect WebSocket for this task
+    connectWS(data.task_id);
+    addTaskToList(data);
+    loadTasks();
+  } catch (e) {
+    showToast('下载失败: ' + e.message, 'error');
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<span>⬇</span> 下载';
+}
+
+// WebSocket connection
+function connectWS(taskId) {
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${location.host}/ws/${taskId}?token=${encodeURIComponent(authToken)}`;
+  const ws = new WebSocket(wsUrl);
+
+  ws.onopen = () => console.log(`WS connected: ${taskId}`);
+
+  ws.onmessage = (event) => {
+    const data = JSON.parse(event.data);
+    handleWSMessage(data);
+  };
+
+  ws.onclose = () => {
+    delete WS_CONNECTIONS[taskId];
+    // Reconnect after delay if task still active
+    setTimeout(() => {
+      const task = TASKS[taskId];
+      if (task && ['queued', 'downloading', 'moving'].includes(task.status)) {
+        connectWS(taskId);
+      }
+    }, 3000);
+  };
+
+  WS_CONNECTIONS[taskId] = ws;
+}
+
+function handleWSMessage(data) {
+  if (!data.task_id) return;
+  const taskId = data.task_id;
+
+  if (data.type === 'progress') {
+    updateTaskProgress(taskId, data);
+    showActiveProgress(taskId, data);
+  } else if (data.type === 'done') {
+    TASKS[taskId] = { ...TASKS[taskId], status: 'done', filename: data.filename };
+    updateTaskUI(taskId);
+    showToast(`下载完成: ${TASKS[taskId]?.title || '文件'}`, 'success');
+    loadFiles();
+  } else if (data.type === 'error') {
+    TASKS[taskId] = { ...TASKS[taskId], status: 'error', error: data.message };
+    updateTaskUI(taskId);
+    showToast(`下载失败: ${data.message}`, 'error');
+  } else if (data.type === 'status') {
+    TASKS[taskId] = { ...TASKS[taskId], ...data };
+    updateTaskUI(taskId);
+  }
+}
+
+function showActiveProgress(taskId, data) {
+  const container = document.getElementById('progressContainer');
+  container.style.display = 'block';
+  const pct = Math.min(100, data.percent || 0);
+  document.getElementById('progressFill').style.width = pct + '%';
+  document.getElementById('progressPercent').textContent = pct.toFixed(1) + '%';
+  document.getElementById('progressSpeed').textContent = data.speed ? `⚡ ${data.speed}` : '';
+  document.getElementById('progressEta').textContent = data.eta ? `⏱ ${data.eta}` : '';
+}
+
+// Task list management
+function addTaskToList(task) {
+  TASKS[task.task_id] = task;
+}
+
+function updateTaskProgress(taskId, data) {
+  if (TASKS[taskId]) {
+    TASKS[taskId].progress = data.percent;
+    TASKS[taskId].speed = data.speed;
+    TASKS[taskId].eta = data.eta;
+    updateTaskUI(taskId);
+  }
+}
+
+function updateTaskUI(taskId) {
+  const task = TASKS[taskId];
+  if (!task) return;
+
+  const el = document.querySelector(`[data-task-id="${taskId}"]`);
+  if (!el) return;
+
+  const statusBadge = el.querySelector('.status-badge');
+  if (statusBadge) {
+    statusBadge.className = `status-badge ${task.status}`;
+    const statusLabels = {
+      queued: '排队中',
+      downloading: '下载中',
+      done: '已完成',
+      error: '失败',
+      moving: '移动中',
+      moved: '已转存',
+    };
+    statusBadge.textContent = statusLabels[task.status] || task.status;
+  }
+
+  const titleEl = el.querySelector('.task-title');
+  if (titleEl && task.title) titleEl.textContent = task.title;
+
+  // Update progress bar if exists
+  const progressFill = el.querySelector('.progress-fill');
+  if (progressFill && task.progress) {
+    progressFill.style.width = Math.min(100, task.progress) + '%';
+  }
+  const progressPct = el.querySelector('.progress-pct');
+  if (progressPct && task.progress) {
+    progressPct.textContent = task.progress.toFixed(1) + '%';
+  }
+  const progressSpeed = el.querySelector('.progress-speed');
+  if (progressSpeed && task.speed) {
+    progressSpeed.textContent = task.speed;
+  }
+}
+
+// Load tasks
+async function loadTasks() {
+  try {
+    const res = await authFetch(`${API}/api/tasks`);
+    const data = await res.json();
+    renderTasks(data.tasks);
+    // Sync local TASKS
+    data.tasks.forEach(t => {
+      if (!TASKS[t.task_id]) {
+        TASKS[t.task_id] = t;
+        if (['queued', 'downloading', 'moving'].includes(t.status)) {
+          connectWS(t.task_id);
+        }
+      }
+    });
+  } catch (e) {
+    console.error('Failed to load tasks:', e);
+  }
+}
+
+function renderTasks(tasks) {
+  const container = document.getElementById('taskList');
+  document.getElementById('taskCount').textContent = tasks.length + ' 个任务';
+
+  if (tasks.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        <p>还没有下载任务，粘贴链接开始吧</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = tasks.map(task => `
+    <div class="task-item ${task.status === 'downloading' ? 'glow-active' : ''}" data-task-id="${task.task_id}">
+      <div class="task-item-with-thumb">
+        ${task.thumbnail ? `<img class="task-thumb ${showThumbnails ? '' : 'hidden'}" src="${task.thumbnail}" onclick="openModal('${task.thumbnail}')" onerror="this.style.display='none'" alt="" />` : ''}
+        <div class="task-content">
+          <div class="task-header">
+            <div class="task-title">${task.title || '获取中...'}</div>
+            <span class="status-badge ${task.status}">${{queued:'排队中',downloading:'下载中',done:'已完成',error:'失败',moving:'移动中',moved:'已转存'}[task.status] || task.status}</span>
+          </div>
+          <div class="task-url">${task.url}</div>
+          ${task.status === 'downloading' ? `
+            <div class="progress-container" style="margin: 8px 0">
+              <div class="progress-bar">
+                <div class="progress-fill" style="width: ${task.progress || 0}%"></div>
+              </div>
+              <div class="progress-info">
+                <span class="progress-pct">${(task.progress || 0).toFixed(1)}%</span>
+                <span class="progress-speed">${task.speed || ''}</span>
+                <span>${task.eta || ''}</span>
+              </div>
+            </div>
+          ` : ''}
+          ${task.status === 'error' ? `<div style="color: var(--error); font-size: 0.85rem; margin-top: 8px;">⚠ ${task.error || '未知错误'}</div>` : ''}
+          <div class="task-actions" style="margin-top: 8px;">
+            ${task.status === 'done' ? `
+              <button class="btn btn-sm btn-success" onclick="moveFile('${task.task_id}', '115')">📦 移动到 115</button>
+              <button class="btn btn-sm btn-success" onclick="moveFile('${task.task_id}', 'baidu')">📦 移动到百度网盘</button>
+            ` : ''}
+            ${task.status === 'moved' ? `<span style="color: var(--success); font-size: 0.85rem;">✓ ${task.cloud_path || ''}</span>` : ''}
+            <button class="btn btn-sm btn-danger" onclick="deleteTask('${task.task_id}')">🗑 删除</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Move file
+async function moveFile(taskId, target) {
+  const targetLabels = { '115': '115网盘', 'baidu': '百度网盘' };
+  showToast(`正在移动到 ${targetLabels[target]}...`, 'info');
+
+  try {
+    const res = await authFetch(`${API}/api/move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_id: taskId, target }),
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`已移动到 ${data.new_path}`, 'success');
+      TASKS[taskId].status = 'moved';
+      TASKS[taskId].cloud_path = data.new_path;
+      updateTaskUI(taskId);
+      loadTasks();
+      loadFiles();
+    }
+  } catch (e) {
+    showToast('移动失败: ' + e.message, 'error');
+  }
+}
+
+// Delete task
+async function deleteTask(taskId) {
+  if (!confirm('确定删除此任务？')) return;
+  try {
+    await authFetch(`${API}/api/tasks/${taskId}`, { method: 'DELETE' });
+    delete TASKS[taskId];
+    if (WS_CONNECTIONS[taskId]) { WS_CONNECTIONS[taskId].close(); delete WS_CONNECTIONS[taskId]; }
+    showToast('已删除', 'info');
+    loadTasks();
+    loadFiles();
+  } catch (e) {
+    showToast('删除失败', 'error');
+  }
+}
+
+// Load files
+async function loadFiles() {
+  try {
+    const res = await authFetch(`${API}/api/files`);
+    const files = await res.json();
+    renderFiles(files);
+  } catch (e) {
+    console.error('Failed to load files:', e);
+  }
+}
+
+function renderFiles(files) {
+  const container = document.getElementById('fileList');
+  document.getElementById('fileCount').textContent = files.length + ' 个文件';
+
+  if (files.length === 0) {
+    container.innerHTML = `
+      <div class="empty-state">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+        <p>还没有已下载的文件</p>
+      </div>`;
+    return;
+  }
+
+  container.innerHTML = files.map(f => `
+    <div class="file-item">
+      <img class="file-thumb ${showThumbnails ? '' : 'hidden'}" src="${f.thumbnail || ''}" onclick="openModal('${f.thumbnail || ''}')" onerror="this.style.display='none'" alt="" />
+      <div class="file-info">
+        <div class="file-title">${f.title}</div>
+        <div class="file-meta">
+          <span>${formatBytes(f.filesize)}</span>
+          ${f.duration ? `<span>${formatDuration(f.duration)}</span>` : ''}
+          <span>${f.format}</span>
+        </div>
+        ${f.cloud_path ? `<div style="font-size: 0.8rem; color: var(--success); margin-top: 4px;">✓ 已转存: ${f.cloud_path}</div>` : ''}
+      </div>
+      <div class="file-actions">
+        ${!f.cloud_path ? `
+          <button class="btn btn-sm btn-success" onclick="moveFile('${f.task_id}', '115')">📦 115</button>
+          <button class="btn btn-sm btn-success" onclick="moveFile('${f.task_id}', 'baidu')">📦 百度网盘</button>
+        ` : ''}
+        <button class="btn btn-sm btn-danger" onclick="deleteTask('${f.task_id}')">🗑</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+// Upload cookies
+async function uploadCookies(input) {
+  const file = input.files[0];
+  if (!file) return;
+
+  const formData = new FormData();
+  formData.append('file', file);
+
+  try {
+    const res = await authFetch(`${API}/api/cookies`, {
+      method: 'POST',
+      body: formData,
+    });
+    const data = await res.json();
+    if (data.success) {
+      document.getElementById('cookieStatus').textContent = '✓ cookies.txt 已上传';
+      document.getElementById('cookieStatus').classList.add('active');
+      showToast('Cookies 上传成功', 'success');
+    }
+  } catch (e) {
+    showToast('Cookies 上传失败', 'error');
+  }
+}
+
+// Check cookies on load
+async function checkCookies() {
+  try {
+    const res = await authFetch(`${API}/api/cookies/status`);
+    const data = await res.json();
+    if (data.has_cookies) {
+      document.getElementById('cookieStatus').textContent = '✓ cookies.txt 已存在';
+      document.getElementById('cookieStatus').classList.add('active');
+    }
+  } catch (e) {}
+}
+
+// Enter key to submit
+document.getElementById('urlInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') startDownload();
+});
+
+// Init
+showThumbnails = localStorage.getItem('yt_dl_thumbnails') !== 'false'; // default true
+initThumbnailToggle();
+checkCookies();
+loadTasks();
+loadFiles();
+
+// Refresh tasks every 10 seconds
+setInterval(loadTasks, 10000);
+</script>
+</body>
+</html>

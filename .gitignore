@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+*.egg-info/
+venv/
+.env
+cookies.txt
+.DS_Store
+downloads/
+*.tmp
+*.log
+.claude/

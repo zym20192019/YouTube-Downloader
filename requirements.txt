@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+pydantic
+yt-dlp
+websockets
+python-multipart
