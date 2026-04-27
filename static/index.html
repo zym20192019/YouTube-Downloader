@@ -830,6 +830,7 @@ header p {
 
 /* HDR Toggle Button */
 .hdr-btn {
+  position: relative;
   padding: 10px 16px;
   border: none;
   border-radius: 12px;
@@ -860,6 +861,8 @@ header p {
   border-radius: 14px;
   background: linear-gradient(45deg, transparent 30%, rgba(255, 215, 0, 0.1) 50%, transparent 70%);
   animation: hdrGlow 3s ease-in-out infinite;
+  pointer-events: none;
+  z-index: -1;
 }
 
 @keyframes hdrGlow {
