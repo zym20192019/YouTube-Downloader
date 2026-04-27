@@ -1140,6 +1140,7 @@ async function startDownload() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url, format: selectedFormat, quality: quality || undefined }),
     });
+    if (!res) return;
     const data = await res.json();
     showToast('下载任务已创建', 'success');
     document.getElementById('urlInput').value = '';
@@ -1288,6 +1289,7 @@ async function loadTasks() {
   await loadMovePaths();  // Load paths first
   try {
     const res = await authFetch(`${API}/api/tasks`);
+    if (!res) return;
     const data = await res.json();
     renderTasks(data.tasks);
     // Sync local TASKS
