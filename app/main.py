@@ -17,6 +17,26 @@ from app.tasks import task_manager
 from app.downloader import download_video, move_to_cloud_drive, DOWNLOAD_DIR, COOKIE_FILE
 
 
+PATH_CONFIG_FILE = Path(__file__).parent.parent / "path_config.json"
+
+
+def load_path_config() -> list[dict]:
+    """Load custom paths from config file, return defaults if not exists."""
+    if PATH_CONFIG_FILE.exists():
+        try:
+            with open(PATH_CONFIG_FILE, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return [{"id": "default", "name": "下载目录", "path": "/root/youtube-downloader/downloads", "icon": "📁"}]
+
+
+def save_path_config(paths: list[dict]) -> None:
+    """Save custom paths to config file."""
+    with open(PATH_CONFIG_FILE, "w") as f:
+        json.dump(paths, f, indent=2)
+
+
 app = FastAPI(title="YouTube Downloader", description="Liquid Glass YouTube Video Downloader")
 
 # Auth
@@ -24,7 +44,7 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Zym@qwe123"
 ACTIVE_TOKENS: dict[str, str] = {}  # token -> username
 
-AUTH_WHITELIST = {"/", "/api/login", "/api/health"}
+AUTH_WHITELIST = {"/api/login", "/api/health"}
 
 def get_token(request: Request) -> str:
     """Extract and validate bearer token."""

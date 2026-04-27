@@ -959,6 +959,7 @@ let selectedFormat = 'best';
 const API = '';
 const TASKS = {};
 const WS_CONNECTIONS = {};
+let MOVE_PATHS = [];
 let authToken = localStorage.getItem('yt_dl_token') || '';
 let showThumbnails = localStorage.getItem('yt_dl_thumbnails') === 'true';
 
@@ -1274,7 +1275,11 @@ function updateTaskUI(taskId) {
 async function loadMovePaths() {
   try {
     const res = await authFetch(`${API}/api/paths`);
-    MOVE_PATHS = await res.json();
+    if (!res) return;  // authFetch returned null (401)
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      MOVE_PATHS = data;
+    }
   } catch (e) {
     // Fallback to defaults
     MOVE_PATHS = [
@@ -1307,52 +1312,85 @@ async function loadTasks() {
 }
 
 function renderTasks(tasks) {
-  const container = document.getElementById('taskList');
-  document.getElementById('taskCount').textContent = tasks.length + ' 个任务';
+    try {
+        if (!Array.isArray(tasks)) tasks = [];
+        const container = document.getElementById('taskList');
+        const countEl = document.getElementById('taskCount');
+        if (countEl) countEl.textContent = tasks.length + ' 个任务';
 
-  if (tasks.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-        <p>还没有下载任务，粘贴链接开始吧</p>
-      </div>`;
-    return;
-  }
+        if (tasks.length === 0) {
+            container.innerHTML = `
+              <div class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+                <p>还没有下载任务，粘贴链接开始吧</p>
+              </div>`;
+            return;
+        }
 
-  container.innerHTML = tasks.map(task => `
-    <div class="task-item ${task.status === 'downloading' ? 'glow-active' : ''}" data-task-id="${task.task_id}">
-      <div class="task-item-with-thumb">
-        ${task.thumbnail ? `<img class="task-thumb ${showThumbnails ? '' : 'hidden'}" src="${task.thumbnail}" onclick="openModal('${task.thumbnail}')" onerror="this.style.display='none'" alt="" />` : ''}
-        <div class="task-content">
-          <div class="task-header">
-            <div class="task-title">${task.title || '获取中...'}</div>
-            <span class="status-badge ${task.status}">${{queued:'排队中',downloading:'下载中',done:'已完成',error:'失败',moving:'移动中',moved:'已转存'}[task.status] || task.status}</span>
-          </div>
-          <div class="task-url">${task.url}</div>
-          ${task.status === 'downloading' ? `
-            <div class="progress-container" style="margin: 8px 0">
-              <div class="progress-bar">
-                <div class="progress-fill" style="width: ${task.progress || 0}%"></div>
-              </div>
-              <div class="progress-info">
-                <span class="progress-pct">${(task.progress || 0).toFixed(1)}%</span>
-                <span class="progress-speed">${task.speed || ''}</span>
-                <span>${task.eta || ''}</span>
-              </div>
-            </div>
-          ` : ''}
-          ${task.status === 'error' ? `<div style="color: var(--error); font-size: 0.85rem; margin-top: 8px;">⚠ ${task.error || '未知错误'}</div>` : ''}
-          <div class="task-actions" style="margin-top: 8px;">
-            ${task.status === 'done' ? `
-              ${MOVE_PATHS.map(p => `<button class="btn btn-sm btn-success" onclick="moveFile('${task.task_id}', '${p.path}', '${p.name.replace("'", "\\'")}')">${p.icon || '📦'} 移动到 ${p.name}</button>`).join('')}
-            ` : ''}
-            ${task.status === 'moved' ? `<span style="color: var(--success); font-size: 0.85rem;">✓ ${task.cloud_path || ''}</span>` : ''}
-            <button class="btn btn-sm btn-danger" onclick="deleteTask('${task.task_id}')">🗑 删除</button>
-          </div>
-        </div>
-      </div>
-    </div>
-  `).join('');
+        const html = tasks.map(task => {
+            const status = task.status || 'queued';
+            const title = task.title || '获取中...';
+            const url = task.url || '';
+            const thumb = task.thumbnail || '';
+            const taskId = task.task_id || '';
+            const progress = task.progress || 0;
+            const speed = task.speed || '';
+            const eta = task.eta || '';
+            const error = task.error || '';
+            const cloudPath = task.cloud_path || '';
+            const statusLabels = {queued:'排队中',downloading:'下载中',done:'已完成',error:'失败',moving:'移动中',moved:'已转存'};
+            const statusLabel = statusLabels[status] || status;
+
+            let moveButtons = '';
+            const paths = Array.isArray(MOVE_PATHS) ? MOVE_PATHS : [];
+            if (status === 'done') {
+                moveButtons = paths.map(p => {
+                    const n = p.name || 'Path';
+                    const pa = p.path || '';
+                    const i = p.icon || '📦';
+                    const safeName = n.replace(/'/g, "\\'");
+                    return `<button class="btn btn-sm btn-success" onclick="moveFile('${taskId}', '${pa}', '${safeName}')">${i} 移动到 ${n}</button>`;
+                }).join('');
+            } else if (status === 'moved') {
+                moveButtons = `<span style="color: var(--success); font-size: 0.85rem;">✓ ${cloudPath}</span>`;
+            }
+
+            return `
+            <div class="task-item ${status === 'downloading' ? 'glow-active' : ''}" data-task-id="${taskId}">
+                <div class="task-item-with-thumb">
+                    ${thumb ? `<img class="task-thumb ${showThumbnails ? '' : 'hidden'}" src="${thumb}" onclick="openModal('${thumb}')" onerror="this.style.display='none'" alt="" />` : ''}
+                    <div class="task-content">
+                        <div class="task-header">
+                            <div class="task-title">${title}</div>
+                            <span class="status-badge ${status}">${statusLabel}</span>
+                        </div>
+                        <div class="task-url">${url}</div>
+                        ${status === 'downloading' ? `
+                            <div class="progress-container" style="margin: 8px 0">
+                                <div class="progress-bar"><div class="progress-fill" style="width: ${progress}%"></div></div>
+                                <div class="progress-info">
+                                    <span class="progress-pct">${progress.toFixed(1)}%</span>
+                                    <span class="progress-speed">${speed}</span>
+                                    <span>${eta}</span>
+                                </div>
+                            </div>
+                        ` : ''}
+                        ${status === 'error' ? `<div style="color: var(--error); font-size: 0.85rem; margin-top: 8px;">⚠ ${error}</div>` : ''}
+                        <div class="task-actions" style="margin-top: 8px;">
+                            ${moveButtons}
+                            <button class="btn btn-sm btn-danger" onclick="deleteTask('${taskId}')">🗑 删除</button>
+                        </div>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+        
+        container.innerHTML = html;
+    } catch (e) {
+        console.error('Render error:', e);
+        const container = document.getElementById('taskList');
+        if (container) container.innerHTML = `<div style="color: red; padding: 20px;">渲染错误: ${e.message}<br><br>请刷新页面</div>`;
+    }
 }
 
 // Move file
@@ -1406,38 +1444,66 @@ async function loadFiles() {
 }
 
 function renderFiles(files) {
-  const container = document.getElementById('fileList');
-  document.getElementById('fileCount').textContent = files.length + ' 个文件';
+    try {
+        if (!Array.isArray(files)) files = [];
+        const container = document.getElementById('fileList');
+        const countEl = document.getElementById('fileCount');
+        if (countEl) countEl.textContent = files.length + ' 个文件';
 
-  if (files.length === 0) {
-    container.innerHTML = `
-      <div class="empty-state">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
-        <p>还没有已下载的文件</p>
-      </div>`;
-    return;
-  }
+        if (files.length === 0) {
+            container.innerHTML = `
+              <div class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+                <p>还没有已下载的文件</p>
+              </div>`;
+            return;
+        }
 
-  container.innerHTML = files.map(f => `
-    <div class="file-item">
-      <img class="file-thumb ${showThumbnails ? '' : 'hidden'}" src="${f.thumbnail || ''}" onclick="openModal('${f.thumbnail || ''}')" onerror="this.style.display='none'" alt="" />
-      <div class="file-info">
-        <div class="file-title">${f.title}</div>
-        <div class="file-meta">
-          <span>${formatBytes(f.filesize)}</span>
-          ${f.duration ? `<span>${formatDuration(f.duration)}</span>` : ''}
-          <span>${f.format}</span>
-        </div>
-        ${f.cloud_path ? `<div style="font-size: 0.8rem; color: var(--success); margin-top: 4px;">✓ 已转存: ${f.cloud_path}</div>` : ''}
-      </div>
-      <div class="file-actions">
-        ${!f.cloud_path ? `
-          ${MOVE_PATHS.map(p => `<button class="btn btn-sm btn-success" onclick="moveFile('${f.task_id}', '${p.path}', '${p.name.replace("'", "\\'")}')">${p.icon || '📦'} ${p.name}</button>`).join('')}
-        ` : ''}
-        <button class="btn btn-sm btn-danger" onclick="deleteTask('${f.task_id}')">🗑</button>
-      </div>
-    </div>
-  `).join('');
+        const html = files.map(f => {
+            const title = f.title || '';
+            const thumb = f.thumbnail || '';
+            const taskId = f.task_id || '';
+            const cloudPath = f.cloud_path || '';
+            
+            let actions = '';
+            const paths = Array.isArray(MOVE_PATHS) ? MOVE_PATHS : [];
+            if (!cloudPath) {
+                actions = paths.map(p => {
+                    const n = p.name || 'Path';
+                    const pa = p.path || '';
+                    const i = p.icon || '📦';
+                    const safeName = n.replace(/'/g, "\\'");
+                    return `<button class="btn btn-sm btn-success" onclick="moveFile('${taskId}', '${pa}', '${safeName}')">${i} ${n}</button>`;
+                }).join('');
+            } else {
+                actions = `<div style="font-size: 0.8rem; color: var(--success); margin-top: 4px;">✓ 已转存: ${cloudPath}</div>`;
+            }
+
+            return `
+            <div class="file-item">
+                <img class="file-thumb ${showThumbnails ? '' : 'hidden'}" src="${thumb}" onclick="openModal('${thumb}')" onerror="this.style.display='none'" alt="" />
+                <div class="file-info">
+                    <div class="file-title">${title}</div>
+                    <div class="file-meta">
+                        <span>${formatBytes(f.filesize)}</span>
+                        ${f.duration ? `<span>${formatDuration(f.duration)}</span>` : ''}
+                        <span>${f.format}</span>
+                    </div>
+                    ${cloudPath ? `<div style="font-size: 0.8rem; color: var(--success); margin-top: 4px;">✓ 已转存: ${cloudPath}</div>` : ''}
+                </div>
+                <div class="file-actions">
+                    ${!cloudPath ? actions : ''}
+                    <button class="btn btn-sm btn-danger" onclick="deleteTask('${taskId}')">🗑</button>
+                </div>
+            </div>`;
+        }).join('');
+        
+        container.innerHTML = html;
+    } catch (e) {
+        console.error('Render files error:', e);
+        const container = document.getElementById('fileList');
+        if (container) container.innerHTML = `<div style="color: red; padding: 20px;">渲染错误: ${e.message}</div>`;
+    }
 }
 
 // Upload cookies
