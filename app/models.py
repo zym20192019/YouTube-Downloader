@@ -14,6 +14,7 @@ class DownloadRequest(BaseModel):
     url: str = Field(..., description="YouTube video URL")
     format: DownloadFormat = Field(default=DownloadFormat.BEST, description="Download format")
     quality: Optional[str] = Field(default=None, description="Quality preference (e.g. '1080p', '720p')")
+    hdr: Optional[str] = Field(default=None, description="HDR preference ('hdr' to enable HDR)")
 
 
 class CloudPath(BaseModel):

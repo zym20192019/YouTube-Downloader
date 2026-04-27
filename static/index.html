@@ -828,6 +828,43 @@ header p {
 }
 .path-input-row input::placeholder { color: var(--text-dim); }
 
+/* HDR Toggle Button */
+.hdr-btn {
+  padding: 10px 16px;
+  border: none;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-border);
+  color: var(--text-dim);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+.hdr-btn:hover {
+  background: var(--glass-bg);
+  color: var(--text);
+}
+.hdr-btn.active {
+  background: linear-gradient(135deg, rgba(255, 215, 0, 0.3), rgba(255, 165, 0, 0.2));
+  border-color: rgba(255, 215, 0, 0.5);
+  color: #ffd700;
+  box-shadow: 0 0 15px rgba(255, 215, 0, 0.3), inset 0 0 10px rgba(255, 215, 0, 0.1);
+}
+.hdr-btn.active::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 14px;
+  background: linear-gradient(45deg, transparent 30%, rgba(255, 215, 0, 0.1) 50%, transparent 70%);
+  animation: hdrGlow 3s ease-in-out infinite;
+}
+
+@keyframes hdrGlow {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
 </style>
 </head>
 <body>
@@ -873,10 +910,12 @@ header p {
         </div>
         <select class="quality-select" id="qualitySelect">
           <option value="">自动质量</option>
+          <option value="4320">8K</option>
           <option value="2160">4K</option>
           <option value="1080">1080p</option>
           <option value="720">720p</option>
         </select>
+        <button class="hdr-btn" id="hdrBtn" onclick="toggleHDR(this)">HDR 关闭</button>
         <button class="btn btn-primary" id="downloadBtn" onclick="startDownload()">
           <span>⬇</span> 下载
         </button>
@@ -956,6 +995,7 @@ header p {
 
 <script>
 let selectedFormat = 'best';
+let hdrEnabled = false;
 const API = '';
 const TASKS = {};
 const WS_CONNECTIONS = {};
@@ -1089,6 +1129,13 @@ function setFormat(fmt, btn) {
   btn.classList.add('active');
 }
 
+// HDR toggle
+function toggleHDR(btn) {
+  hdrEnabled = !hdrEnabled;
+  btn.classList.toggle('active', hdrEnabled);
+  btn.textContent = hdrEnabled ? 'HDR 开启' : 'HDR 关闭';
+}
+
 // Tab switching
 function switchTab(tab, btn) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -1136,10 +1183,11 @@ async function startDownload() {
 
   try {
     const quality = document.getElementById('qualitySelect').value;
+    const hdr = hdrEnabled ? "hdr" : undefined;
     const res = await authFetch(`${API}/api/download`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, format: selectedFormat, quality: quality || undefined }),
+      body: JSON.stringify({ url, format: selectedFormat, quality: quality || undefined, hdr: hdr }),
     });
     if (!res) return;
     const data = await res.json();

@@ -36,7 +36,7 @@ def _format_bytes(bytes_val: Optional[float]) -> Optional[str]:
     return f"{bytes_val:.1f}TB"
 
 
-def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = None) -> Dict[str, Any]:
+def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = None, hdr: Optional[str] = None) -> Dict[str, Any]:
     outtmpl = str(DOWNLOAD_DIR / "%(title)s [%(id)s].%(ext)s")
 
     if fmt == DownloadFormat.AUDIO:
@@ -47,7 +47,9 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
             "preferredquality": "192",
         }]
     elif fmt == DownloadFormat.VIDEO:
-        if quality and "2160" in quality:
+        if quality and "4320" in quality:
+            format_spec = "bestvideo[height<=4320]+bestaudio/best"
+        elif quality and "2160" in quality:
             format_spec = "bestvideo[height<=2160]+bestaudio/best"
         elif quality and "1080" in quality:
             format_spec = "bestvideo[height<=1080]+bestaudio/best"
@@ -65,6 +67,12 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
             "key": "FFmpegVideoRemuxer",
             "preferedformat": "mp4",
         }]
+
+    # HDR preference: add HDR format preferences
+    if hdr == "hdr" and fmt != DownloadFormat.AUDIO:
+        # Prefer HDR formats (VP9.2/AV1 with HDR, or bt2020 color primaries)
+        hdr_formats = "bestvideo[dynamicrange=hdr]+bestvideo[vcodec^=av1]+bestvideo[vcodec^=vp9.2]"
+        format_spec = f"{hdr_formats}+bestaudio/best/{format_spec}"
 
     def progress_hook(d: dict):
         if d["status"] == "downloading":
@@ -131,12 +139,12 @@ def datetime_to_timestamp(iso_str: str) -> float:
         return 0
 
 
-async def download_video(task_id: str, url: str, fmt: DownloadFormat, quality: Optional[str] = None):
+async def download_video(task_id: str, url: str, fmt: DownloadFormat, quality: Optional[str] = None, hdr: Optional[str] = None):
     """Run yt-dlp download in a thread to not block the event loop."""
     task_manager.update_task(task_id, status="downloading")
 
     loop = asyncio.get_event_loop()
-    ydl_opts = _get_ydl_opts(task_id, fmt, quality)
+    ydl_opts = _get_ydl_opts(task_id, fmt, quality, hdr)
 
     def _download():
         try:

@@ -44,7 +44,7 @@ ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Zym@qwe123"
 ACTIVE_TOKENS: dict[str, str] = {}  # token -> username
 
-AUTH_WHITELIST = {"/api/login", "/api/health"}
+AUTH_WHITELIST = {"/", "/api/login", "/api/health"}
 
 def get_token(request: Request) -> str:
     """Extract and validate bearer token."""
@@ -150,7 +150,7 @@ async def create_download(req: DownloadRequest):
 
     # Start download in background
     asyncio.create_task(
-        download_video(task_id, req.url, req.format, req.quality)
+        download_video(task_id, req.url, req.format, req.quality, req.hdr)
     )
 
     task = task_manager.get_task(task_id)
