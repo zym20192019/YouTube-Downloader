@@ -28,6 +28,18 @@ class BatchDeleteRequest(BaseModel):
     task_ids: list[str]
 
 
+class Subscription(BaseModel):
+    id: str
+    url: str
+    name: str = ""
+    auto_download: bool = True
+    format: str = "best"
+    quality: Optional[str] = None
+    created_at: str = ""
+    last_checked: str = ""
+    last_video_count: int = 0
+
+
 PATH_CONFIG_FILE = Path(__file__).parent.parent / "path_config.json"
 
 
@@ -343,6 +355,192 @@ async def batch_delete_tasks(req: BatchDeleteRequest):
         results["success"] += 1
         results["details"].append({"task_id": task_id, "status": "deleted"})
     return results
+
+
+
+
+# ── Subscriptions ──────────────────────────────────────────────────────────
+SUBSCRIPTIONS_FILE = Path(__file__).parent.parent / "subscriptions.json"
+
+
+def load_subscriptions() -> list[dict]:
+    if SUBSCRIPTIONS_FILE.exists():
+        try:
+            with open(SUBSCRIPTIONS_FILE, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, IOError):
+            pass
+    return []
+
+
+def save_subscriptions(subs: list[dict]) -> None:
+    with open(SUBSCRIPTIONS_FILE, "w") as f:
+        json.dump(subs, f, indent=2)
+
+
+def _extract_existing_video_ids() -> set[str]:
+    """Get all YouTube video IDs already downloaded."""
+    ids = set()
+    for task in task_manager.tasks.values():
+        url = task.get("url", "")
+        if "watch?v=" in url:
+            ids.add(url.split("watch?v=")[1].split("&")[0])
+        elif "youtu.be/" in url:
+            ids.add(url.split("youtu.be/")[1].split("?")[0])
+    return ids
+
+
+@app.get("/api/subscriptions")
+async def list_subscriptions():
+    return load_subscriptions()
+
+
+@app.post("/api/subscriptions")
+async def add_subscription(req: Subscription):
+    subs = load_subscriptions()
+    for s in subs:
+        if s["url"] == req.url:
+            raise HTTPException(status_code=400, detail="Subscription already exists")
+    now = datetime.now().isoformat()
+    new_sub = {
+        "id": str(uuid.uuid4())[:8],
+        "url": req.url,
+        "name": req.name or "",
+        "auto_download": req.auto_download,
+        "format": req.format or "best",
+        "quality": req.quality,
+        "created_at": now,
+        "last_checked": "",
+        "last_video_count": 0,
+    }
+    subs.append(new_sub)
+    save_subscriptions(subs)
+    return new_sub
+
+
+@app.delete("/api/subscriptions/{sub_id}")
+async def delete_subscription(sub_id: str):
+    subs = load_subscriptions()
+    new_subs = [s for s in subs if s["id"] != sub_id]
+    if len(new_subs) == len(subs):
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    save_subscriptions(new_subs)
+    return {"success": True}
+
+
+@app.post("/api/subscriptions/{sub_id}/update")
+async def update_subscription(sub_id: str, req: Subscription):
+    subs = load_subscriptions()
+    for i, s in enumerate(subs):
+        if s["id"] == sub_id:
+            subs[i].update({
+                "name": req.name,
+                "url": req.url,
+                "auto_download": req.auto_download,
+                "format": req.format,
+                "quality": req.quality,
+            })
+            save_subscriptions(subs)
+            return subs[i]
+    raise HTTPException(status_code=404, detail="Subscription not found")
+
+
+async def _check_single_subscription(sub: dict) -> dict:
+    """Check one subscription for new videos."""
+    import yt_dlp
+
+    existing_ids = _extract_existing_video_ids()
+
+    def _fetch_videos():
+        try:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+                info = ydl.extract_info(sub["url"], download=False)
+                if info.get("_type") == "playlist":
+                    entries = info.get("entries", [])
+                elif info.get("entries"):
+                    entries = info.get("entries", [])
+                else:
+                    entries = [info] if info.get("id") else []
+                return {
+                    "title": info.get("title", "Unknown"),
+                    "entries": [
+                        {
+                            "id": e.get("id"),
+                            "title": e.get("title", "Unknown"),
+                            "url": e.get("url") or e.get("webpage_url") or f"https://www.youtube.com/watch?v={e.get('id')}",
+                            "duration": e.get("duration"),
+                            "thumbnail": e.get("thumbnail"),
+                        }
+                        for e in entries[:100]
+                        if e and e.get("id")
+                    ],
+                }
+        except Exception as e:
+            return {"error": str(e)}
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _fetch_videos)
+
+    if "error" in result:
+        return {"subscription_name": sub.get("name", ""), "error": result["error"]}
+
+    new_videos = [v for v in result["entries"] if v["id"] not in existing_ids]
+
+    downloaded = []
+    if sub.get("auto_download", True) and new_videos:
+        for video in new_videos[:10]:
+            fmt = sub.get("format", "best") or "best"
+            quality = sub.get("quality")
+            task_id = task_manager.create_task(video["url"], DownloadFormat(fmt), quality)
+            task_manager.set_metadata(task_id, title=video["title"], thumbnail=video.get("thumbnail"), duration=video.get("duration"))
+            asyncio.create_task(download_video(task_id, video["url"], DownloadFormat(fmt), quality))
+            downloaded.append(video["title"])
+
+    return {
+        "subscription_name": result.get("title", ""),
+        "total_videos": len(result["entries"]),
+        "new_videos": len(new_videos),
+        "downloaded": downloaded,
+        "skipped": max(0, len(new_videos) - 10),
+    }
+
+
+@app.post("/api/subscriptions/{sub_id}/check")
+async def check_subscription(sub_id: str):
+    subs = load_subscriptions()
+    sub = next((s for s in subs if s["id"] == sub_id), None)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    result = await _check_single_subscription(sub)
+
+    sub["last_checked"] = datetime.now().isoformat()
+    sub["last_video_count"] = result.get("new_videos", 0)
+    save_subscriptions(subs)
+
+    return result
+
+
+@app.post("/api/subscriptions/check-all")
+async def check_all_subscriptions():
+    subs = load_subscriptions()
+    results = []
+    for sub in subs:
+        try:
+            result = await _check_single_subscription(sub)
+            results.append({
+                "id": sub["id"],
+                "name": sub.get("name", sub["url"]),
+                "new_videos": result.get("new_videos", 0),
+                "downloaded": result.get("downloaded", []),
+            })
+            sub["last_checked"] = datetime.now().isoformat()
+            sub["last_video_count"] = result.get("new_videos", 0)
+        except Exception as e:
+            results.append({"id": sub["id"], "name": sub.get("name", sub["url"]), "error": str(e)})
+    save_subscriptions(subs)
+    return {"total": len(subs), "results": results}
+
 
 
 @app.get("/api/files", response_model=list[FileItem])

@@ -1038,6 +1038,7 @@ header p {
   <div class="tabs" style="display: flex; align-items: center; justify-content: space-between;">
     <div style="display: flex; gap: 4px;">
       <button class="tab active" onclick="switchTab('tasks', this)">📋 下载队列</button>
+      <button class="tab" onclick="switchTab('subscriptions', this)">📺 订阅</button>
       <button class="tab" onclick="switchTab('files', this)">📁 已下载文件</button>
     </div>
     <div class="thumbnail-toggle" id="thumbnailToggle" onclick="toggleThumbnails()">
@@ -1094,6 +1095,41 @@ header p {
       <div id="playlistChildList">
         <div class="empty-state">
           <p>加载中...</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Subscriptions Tab -->
+  <div class="tab-content" id="subscriptionsTab" style="display: none;">
+    <div class="glass">
+      <div class="section-header">
+        <h2>频道订阅</h2>
+        <button class="btn btn-sm btn-primary" onclick="showAddSubscription()">➕ 添加订阅</button>
+      </div>
+
+      <!-- Add/Edit Form (hidden by default) -->
+      <div id="subscriptionForm" style="display: none; margin-bottom: 16px; padding: 16px; background: var(--glass-bg); border-radius: 12px; border: 1px solid var(--glass-border);">
+        <h3 id="subFormTitle" style="font-size: 1rem; margin-bottom: 12px;">添加订阅</h3>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+          <input type="text" id="subUrlInput" placeholder="频道 URL 或播放列表 URL" style="background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 0.9rem;" />
+          <input type="text" id="subNameInput" placeholder="备注名称（可选）" style="background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 8px; padding: 8px 12px; color: var(--text); font-size: 0.9rem;" />
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-dim); cursor: pointer;">
+              <input type="checkbox" id="subAutoDownload" checked style="accent-color: var(--primary);" /> 自动下载新视频
+            </label>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-sm btn-primary" onclick="saveSubscription()">保存</button>
+            <button class="btn btn-sm" onclick="hideSubscriptionForm()">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="subscriptionList">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg>
+          <p>还没有订阅，添加频道 URL 开始追踪吧</p>
         </div>
       </div>
     </div>
@@ -1307,6 +1343,134 @@ async function batchDelete() {
   }
 }
 
+// ── Subscription Management ──────────────────────────────────────────────
+let editingSubId = null;
+
+async function loadSubscriptions() {
+  try {
+    const res = await authFetch(`${API}/api/subscriptions`);
+    if (!res) return;
+    const subs = await res.json();
+    renderSubscriptions(subs);
+  } catch (e) {
+    console.error('Failed to load subscriptions:', e);
+  }
+}
+
+function renderSubscriptions(subs) {
+  const container = document.getElementById('subscriptionList');
+  if (!subs || subs.length === 0) {
+    container.innerHTML = `<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z"/></svg><p>还没有订阅，添加频道 URL 开始追踪吧</p></div>`;
+    return;
+  }
+  const html = subs.map(s => {
+    const name = s.name || '未命名';
+    const url = s.url || '';
+    const auto = s.auto_download !== false;
+    const checked = s.last_checked ? new Date(s.last_checked).toLocaleString('zh-CN') : '从未检查';
+    const count = s.last_video_count || 0;
+    return `
+    <div class="task-item" style="margin-bottom: 8px;">
+      <div class="task-content">
+        <div class="task-header">
+          <div class="task-title">${name}</div>
+          <span class="status-badge ${auto ? 'done' : 'queued'}">${auto ? '🔄 自动' : '⏸ 手动'}</span>
+        </div>
+        <div class="task-url">${url}</div>
+        <div style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">上次检查: ${checked} · 发现新视频: ${count} 个</div>
+        <div class="task-actions" style="margin-top: 8px;">
+          <button class="btn btn-sm btn-primary" onclick="checkSubscription('${s.id}')">🔍 检查更新</button>
+          <button class="btn btn-sm" onclick="editSubscription('${s.id}', '${url.replace(/'/g, "\\'")}', '${name.replace(/'/g, "\\'")}', ${auto})">✏️ 编辑</button>
+          <button class="btn btn-sm btn-danger" onclick="deleteSubscription('${s.id}')">🗑 删除</button>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+  container.innerHTML = html;
+}
+
+function showAddSubscription() {
+  editingSubId = null;
+  document.getElementById('subFormTitle').textContent = '添加订阅';
+  document.getElementById('subUrlInput').value = '';
+  document.getElementById('subNameInput').value = '';
+  document.getElementById('subAutoDownload').checked = true;
+  document.getElementById('subscriptionForm').style.display = 'block';
+}
+
+function editSubscription(id, url, name, auto) {
+  editingSubId = id;
+  document.getElementById('subFormTitle').textContent = '编辑订阅';
+  document.getElementById('subUrlInput').value = url;
+  document.getElementById('subNameInput').value = name;
+  document.getElementById('subAutoDownload').checked = auto;
+  document.getElementById('subscriptionForm').style.display = 'block';
+}
+
+function hideSubscriptionForm() {
+  document.getElementById('subscriptionForm').style.display = 'none';
+  editingSubId = null;
+}
+
+async function saveSubscription() {
+  const url = document.getElementById('subUrlInput').value.trim();
+  const name = document.getElementById('subNameInput').value.trim();
+  const auto = document.getElementById('subAutoDownload').checked;
+  if (!url) {
+    showToast('请输入频道 URL', 'error');
+    return;
+  }
+  try {
+    if (editingSubId) {
+      await authFetch(`${API}/api/subscriptions/${editingSubId}/update`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: editingSubId, url, name, auto_download: auto, format: 'best' }),
+      });
+      showToast('订阅已更新', 'success');
+    } else {
+      await authFetch(`${API}/api/subscriptions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: '', url, name, auto_download: auto, format: 'best' }),
+      });
+      showToast('订阅已添加', 'success');
+    }
+    hideSubscriptionForm();
+    loadSubscriptions();
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
+}
+
+async function deleteSubscription(id) {
+  if (!confirm('确定删除此订阅？')) return;
+  try {
+    await authFetch(`${API}/api/subscriptions/${id}`, { method: 'DELETE' });
+    showToast('订阅已删除', 'info');
+    loadSubscriptions();
+  } catch (e) {
+    showToast('删除失败', 'error');
+  }
+}
+
+async function checkSubscription(id) {
+  showToast('正在检查更新...', 'info');
+  try {
+    const res = await authFetch(`${API}/api/subscriptions/${id}/check`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      showToast('检查失败: ' + data.error, 'error');
+    } else {
+      const msg = `发现 ${data.new_videos} 个新视频` + (data.downloaded.length > 0 ? `，已下载 ${data.downloaded.length} 个` : '');
+      showToast(msg, data.new_videos > 0 ? 'success' : 'info');
+    }
+    loadSubscriptions();
+  } catch (e) {
+    showToast('检查失败: ' + e.message, 'error');
+  }
+}
+
 function onFileFilterChange() {
   clearTimeout(filterTimeout);
   filterTimeout = setTimeout(() => {
@@ -1448,6 +1612,7 @@ function switchTab(tab, btn) {
   btn.classList.add('active');
   document.getElementById(tab + 'Tab').classList.add('active');
   if (tab === 'files') loadFiles();
+  if (tab === 'subscriptions') loadSubscriptions();
 }
 
 // Toast notifications
