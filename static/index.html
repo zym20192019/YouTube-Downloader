@@ -677,7 +677,70 @@ header p {
   margin-left: auto;
 }
 
-/* Task with thumbnail */
+/* Batch Action Bar */
+.batch-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: rgba(15, 10, 40, 0.95);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid var(--glass-border);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  animation: slideUp 0.3s ease;
+}
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.batch-count {
+  font-size: 0.95rem;
+  color: var(--text);
+  font-weight: 600;
+}
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.batch-move-btns {
+  display: flex;
+  gap: 6px;
+}
+
+/* Task checkbox */
+.task-checkbox {
+  width: 20px;
+  height: 20px;
+  border-radius: 5px;
+  border: 2px solid var(--glass-border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s;
+  margin-right: 10px;
+  margin-top: 4px;
+}
+.task-checkbox:hover {
+  border-color: var(--primary);
+}
+.task-checkbox.selected {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.task-checkbox.selected::after {
+  content: '✓';
+  color: white;
+  font-size: 12px;
+  font-weight: bold;
+}
 .task-item-with-thumb {
   display: flex;
   gap: 12px;
@@ -1004,6 +1067,7 @@ header p {
           <option value="moving">移动中</option>
           <option value="moved">已转存</option>
         </select>
+        <button class="btn btn-sm" id="selectAllBtn" onclick="toggleSelectAll()" style="display: none; white-space: nowrap;">☑️ 全选</button>
       </div>
       <div id="taskList">
         <div class="empty-state">
@@ -1055,6 +1119,15 @@ header p {
   </div>
 </div>
 
+<!-- Batch Action Bar -->
+<div class="batch-bar" id="batchBar" style="display: none;">
+  <span class="batch-count" id="batchCount">已选 0 项</span>
+  <div class="batch-actions">
+    <button class="btn btn-sm btn-danger" onclick="batchDelete()">🗑️ 批量删除</button>
+    <div class="batch-move-btns" id="batchMoveBtns"></div>
+  </div>
+</div>
+
 <!-- Modal / Lightbox -->
 <div class="modal-overlay" id="imageModal" onclick="closeModal(event)">
   <div class="modal-content">
@@ -1078,6 +1151,9 @@ let filterTaskStatus = '';
 let filterFileQ = '';
 let filterTimeout = null;
 
+// Batch selection state
+const SELECTED_TASKS = new Set();
+
 function onTaskFilterChange() {
   clearTimeout(filterTimeout);
   // Show/hide clear button
@@ -1099,6 +1175,136 @@ function clearTaskSearch() {
   filterTaskStatus = '';
   document.getElementById('taskSearchClear').style.display = 'none';
   loadTasks();
+}
+
+// Batch selection
+function toggleTaskSelect(taskId) {
+  if (SELECTED_TASKS.has(taskId)) {
+    SELECTED_TASKS.delete(taskId);
+  } else {
+    SELECTED_TASKS.add(taskId);
+  }
+  updateBatchBar();
+  updateCheckboxUI(taskId);
+}
+
+function toggleSelectAll() {
+  const allItems = document.querySelectorAll('.task-item[data-task-id]');
+  const allIds = Array.from(allItems).map(el => el.dataset.taskId);
+  const allSelected = allIds.every(id => SELECTED_TASKS.has(id));
+
+  if (allSelected) {
+    allIds.forEach(id => SELECTED_TASKS.delete(id));
+  } else {
+    allIds.forEach(id => SELECTED_TASKS.add(id));
+  }
+  updateBatchBar();
+  allItems.forEach(el => updateCheckboxUI(el.dataset.taskId));
+}
+
+function updateCheckboxUI(taskId) {
+  const item = document.querySelector(`.task-item[data-task-id="${taskId}"]`);
+  if (!item) return;
+  const cb = item.querySelector('.task-checkbox');
+  if (!cb) return;
+  const isSelected = SELECTED_TASKS.has(taskId);
+  cb.className = `task-checkbox ${isSelected ? 'selected' : ''}`;
+}
+
+function updateBatchBar() {
+  const bar = document.getElementById('batchBar');
+  const countEl = document.getElementById('batchCount');
+  const selectAllBtn = document.getElementById('selectAllBtn');
+  const moveBtns = document.getElementById('batchMoveBtns');
+
+  const count = SELECTED_TASKS.size;
+  if (count === 0) {
+    bar.style.display = 'none';
+    selectAllBtn.style.display = 'none';
+    document.body.style.paddingBottom = '0';
+    return;
+  }
+
+  bar.style.display = 'flex';
+  selectAllBtn.style.display = 'inline-block';
+  countEl.textContent = `已选 ${count} 项 (点击取消)`;
+  countEl.style.cursor = 'pointer';
+  countEl.onclick = () => { SELECTED_TASKS.clear(); updateBatchBar(); loadTasks(); };
+  document.body.style.paddingBottom = '60px';
+
+  // Show move buttons for tasks with status 'done'
+  const doneIds = Array.from(SELECTED_TASKS).filter(id => {
+    const t = TASKS[id];
+    return t && (t.status === 'done' || t.status === 'moved');
+  });
+
+  if (doneIds.length > 0) {
+    const paths = Array.isArray(MOVE_PATHS) ? MOVE_PATHS : [];
+    moveBtns.innerHTML = paths.map(p => {
+      const n = p.name || 'Path';
+      const pa = p.path || '';
+      const i = p.icon || '📦';
+      const safeName = n.replace(/'/g, "\\'");
+      return `<button class="btn btn-sm btn-success" onclick="batchMove('${pa}', '${safeName}')">${i} 移到${n}</button>`;
+    }).join('');
+  } else {
+    moveBtns.innerHTML = '';
+  }
+}
+
+// Batch move
+async function batchMove(targetPath, targetName) {
+  const ids = Array.from(SELECTED_TASKS).filter(id => {
+    const t = TASKS[id];
+    return t && (t.status === 'done' || t.status === 'moved');
+  });
+  if (ids.length === 0) {
+    showToast('没有可移动的任务', 'info');
+    return;
+  }
+  showToast(`正在移动 ${ids.length} 个文件到 ${targetName || targetPath}...`, 'info');
+  try {
+    const res = await authFetch(`${API}/api/tasks/batch-move`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: ids, target_path: targetPath, target_name: targetName }),
+    });
+    const data = await res.json();
+    SELECTED_TASKS.clear();
+    updateBatchBar();
+    showToast(`批量移动完成：成功 ${data.success} 个，失败 ${data.failed} 个`, data.failed > 0 ? 'error' : 'success');
+    loadTasks();
+    loadFiles();
+  } catch (e) {
+    showToast('批量移动失败: ' + e.message, 'error');
+  }
+}
+
+// Batch delete
+async function batchDelete() {
+  const ids = Array.from(SELECTED_TASKS);
+  if (ids.length === 0) {
+    showToast('请先选择要删除的任务', 'info');
+    return;
+  }
+  if (!confirm(`确定删除 ${ids.length} 个任务？已转存的文件不会被删除。`)) return;
+  showToast(`正在删除 ${ids.length} 个任务...`, 'info');
+  try {
+    const res = await authFetch(`${API}/api/tasks/batch-delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: ids }),
+    });
+    const data = await res.json();
+    ids.forEach(id => delete TASKS[id]);
+    SELECTED_TASKS.clear();
+    updateBatchBar();
+    showToast(`批量删除完成：成功 ${data.success} 个，失败 ${data.failed} 个`, data.failed > 0 ? 'error' : 'success');
+    loadTasks();
+    loadFiles();
+  } catch (e) {
+    showToast('批量删除失败: ' + e.message, 'error');
+  }
 }
 
 function onFileFilterChange() {
@@ -1583,8 +1789,11 @@ function renderTasks(tasks) {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
                 ${hasFilter ? '<p>没有匹配的任务，请调整搜索条件</p>' : '<p>还没有下载任务，粘贴链接开始吧</p>'}
               </div>`;
+            document.getElementById('selectAllBtn').style.display = 'none';
             return;
         }
+
+        document.getElementById('selectAllBtn').style.display = 'inline-block';
 
         const html = tasks.map(task => {
             const status = task.status || 'queued';
@@ -1601,6 +1810,7 @@ function renderTasks(tasks) {
             const playlistProgress = task.playlist_progress || {current: 0, total: 0};
             const statusLabels = {queued:'排队中',downloading:'下载中',done:'已完成',error:'失败',moving:'移动中',moved:'已转存'};
             const statusLabel = statusLabels[status] || status;
+            const isSelected = SELECTED_TASKS.has(taskId);
 
             let moveButtons = '';
             const paths = Array.isArray(MOVE_PATHS) ? MOVE_PATHS : [];
@@ -1643,6 +1853,7 @@ function renderTasks(tasks) {
 
             return `
             <div class="task-item ${status === 'downloading' ? 'glow-active' : ''}" data-task-id="${taskId}">
+                <div class="task-checkbox ${isSelected ? 'selected' : ''}" onclick="toggleTaskSelect('${taskId}')"></div>
                 <div class="task-item-with-thumb">
                     ${thumb && !isPlaylist ? `<img class="task-thumb ${showThumbnails ? '' : 'hidden'}" src="${thumb}" onclick="openModal('${thumb}')" onerror="this.style.display='none'" alt="" />` : ''}
                     ${isPlaylist ? `<div class="task-thumb ${showThumbnails ? '' : 'hidden'}" style="display: flex; align-items: center; justify-content: center; background: rgba(99, 102, 241, 0.2); font-size: 2rem;">📁</div>` : ''}

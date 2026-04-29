@@ -8,6 +8,7 @@ from datetime import datetime
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, Request, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
 from app.models import (
     DownloadRequest, MoveRequest, TaskResponse, TaskListResponse,
@@ -15,6 +16,16 @@ from app.models import (
 )
 from app.tasks import task_manager
 from app.downloader import download_video, move_to_cloud_drive, DOWNLOAD_DIR, COOKIE_FILE
+
+
+class BatchMoveRequest(BaseModel):
+    task_ids: list[str]
+    target_path: str
+    target_name: Optional[str] = None
+
+
+class BatchDeleteRequest(BaseModel):
+    task_ids: list[str]
 
 
 PATH_CONFIG_FILE = Path(__file__).parent.parent / "path_config.json"
@@ -288,6 +299,50 @@ async def move_file(req: MoveRequest):
         new_path=dest,
         target=req.target_name or req.target_path,
     )
+
+
+@app.post("/api/tasks/batch-move")
+async def batch_move_files(req: BatchMoveRequest):
+    """Move multiple tasks to a target directory."""
+    results = {"success": 0, "failed": 0, "details": []}
+    for task_id in req.task_ids:
+        task = task_manager.get_task(task_id)
+        if not task or not task.get("filepath"):
+            results["failed"] += 1
+            results["details"].append({"task_id": task_id, "status": "skipped", "reason": "Task not found or no file"})
+            continue
+        result = await move_to_cloud_drive(task_id, req.target_path, req.target_name)
+        if result:
+            results["success"] += 1
+            results["details"].append({"task_id": task_id, "status": "moved", "path": result[1]})
+        else:
+            results["failed"] += 1
+            results["details"].append({"task_id": task_id, "status": "failed", "reason": "Move operation failed"})
+    return results
+
+
+@app.post("/api/tasks/batch-delete")
+async def batch_delete_tasks(req: BatchDeleteRequest):
+    """Delete multiple tasks and their files."""
+    results = {"success": 0, "failed": 0, "details": []}
+    for task_id in req.task_ids:
+        task = task_manager.get_task(task_id)
+        if not task:
+            results["failed"] += 1
+            results["details"].append({"task_id": task_id, "status": "skipped", "reason": "Task not found"})
+            continue
+        # Delete file if exists
+        if task.get("filepath") and os.path.exists(task["filepath"]):
+            try:
+                os.remove(task["filepath"])
+            except OSError:
+                pass
+        # Close WS connection if exists
+        task_manager.subscribers.pop(task_id, None)
+        task_manager.delete_task(task_id)
+        results["success"] += 1
+        results["details"].append({"task_id": task_id, "status": "deleted"})
+    return results
 
 
 @app.get("/api/files", response_model=list[FileItem])
