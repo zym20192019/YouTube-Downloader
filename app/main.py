@@ -62,12 +62,37 @@ def save_path_config(paths: list[dict]) -> None:
 
 app = FastAPI(title="YouTube Downloader", description="Liquid Glass YouTube Video Downloader")
 
+# Download queue with concurrency control
+MAX_CONCURRENT_DOWNLOADS = 3
+DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+download_queue: asyncio.Queue = asyncio.Queue()
+
+
+async def download_worker():
+    """Background worker that processes queued downloads with max concurrency."""
+    while True:
+        task_id, url, fmt, quality, hdr = await download_queue.get()
+        try:
+            async with DOWNLOAD_SEMAPHORE:
+                await download_video(task_id, url, fmt, quality, hdr)
+        except Exception as e:
+            task_manager.set_error(task_id, str(e))
+        finally:
+            download_queue.task_done()
+
+
+@app.on_event("startup")
+async def startup():
+    """Start the download worker on app startup."""
+    asyncio.create_task(download_worker())
+
+
 # Auth
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Zym@qwe123"
 ACTIVE_TOKENS: dict[str, str] = {}  # token -> username
 
-AUTH_WHITELIST = {"/", "/api/login", "/api/health", "/favicon.ico"}
+AUTH_WHITELIST = {"/", "/api/login", "/api/health", "/api/queue/status", "/favicon.ico"}
 
 def get_token(request: Request) -> str:
     """Extract and validate bearer token."""
@@ -171,10 +196,8 @@ async def index():
 async def create_download(req: DownloadRequest):
     task_id = task_manager.create_task(req.url, req.format, req.quality)
 
-    # Start download in background
-    asyncio.create_task(
-        download_video(task_id, req.url, req.format, req.quality, req.hdr)
-    )
+    # Add to download queue (processed by worker with max 3 concurrency)
+    await download_queue.put((task_id, req.url, req.format, req.quality, req.hdr))
 
     task = task_manager.get_task(task_id)
     return TaskResponse(**task)
@@ -187,7 +210,7 @@ async def create_playlist_download(req: DownloadRequest):
 
     task_id = task_manager.create_playlist_task(req.url, req.format, req.quality)
 
-    # Start playlist download in background
+    # Playlists bypass queue - they handle their own sequential downloads
     asyncio.create_task(
         download_playlist(task_id, req.url, req.format, req.quality, req.hdr)
     )
@@ -487,14 +510,17 @@ async def _check_single_subscription(sub: dict) -> dict:
     new_videos = [v for v in result["entries"] if v["id"] not in existing_ids]
 
     downloaded = []
+    queued_count = 0
     if sub.get("auto_download", True) and new_videos:
         for video in new_videos[:10]:
             fmt = sub.get("format", "best") or "best"
             quality = sub.get("quality")
             task_id = task_manager.create_task(video["url"], DownloadFormat(fmt), quality)
             task_manager.set_metadata(task_id, title=video["title"], thumbnail=video.get("thumbnail"), duration=video.get("duration"))
-            asyncio.create_task(download_video(task_id, video["url"], DownloadFormat(fmt), quality))
+            # Add to queue instead of direct execution
+            await download_queue.put((task_id, video["url"], DownloadFormat(fmt), quality, None))
             downloaded.append(video["title"])
+            queued_count += 1
 
     return {
         "subscription_name": result.get("title", ""),
@@ -502,6 +528,7 @@ async def _check_single_subscription(sub: dict) -> dict:
         "new_videos": len(new_videos),
         "downloaded": downloaded,
         "skipped": max(0, len(new_videos) - 10),
+        "queued": queued_count,
     }
 
 
@@ -541,6 +568,86 @@ async def check_all_subscriptions():
     save_subscriptions(subs)
     return {"total": len(subs), "results": results}
 
+
+@app.post("/api/subscriptions/{sub_id}/download-history")
+async def download_subscription_history(sub_id: str):
+    """Download ALL videos from a subscription (historical + new). Queued with max 3 concurrency."""
+    import yt_dlp
+
+    subs = load_subscriptions()
+    sub = next((s for s in subs if s["id"] == sub_id), None)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    existing_ids = _extract_existing_video_ids()
+
+    def _fetch_all_videos():
+        try:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+                info = ydl.extract_info(sub["url"], download=False)
+                if info.get("_type") == "playlist":
+                    entries = info.get("entries", [])
+                elif info.get("entries"):
+                    entries = info.get("entries", [])
+                else:
+                    entries = [info] if info.get("id") else []
+                return {
+                    "title": info.get("title", "Unknown"),
+                    "entries": [
+                        {
+                            "id": e.get("id"),
+                            "title": e.get("title", "Unknown"),
+                            "url": e.get("url") or e.get("webpage_url") or f"https://www.youtube.com/watch?v={e.get('id')}",
+                            "duration": e.get("duration"),
+                            "thumbnail": e.get("thumbnail"),
+                        }
+                        for e in entries
+                        if e and e.get("id")
+                    ],
+                }
+        except Exception as e:
+            return {"error": str(e)}
+
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(None, _fetch_all_videos)
+
+    if "error" in result:
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    # Queue ALL videos that haven't been downloaded
+    new_videos = [v for v in result["entries"] if v["id"] not in existing_ids]
+    queued_count = 0
+
+    fmt = sub.get("format", "best") or "best"
+    quality = sub.get("quality")
+
+    for video in new_videos:
+        task_id = task_manager.create_task(video["url"], DownloadFormat(fmt), quality)
+        task_manager.set_metadata(task_id, title=video["title"], thumbnail=video.get("thumbnail"), duration=video.get("duration"))
+        await download_queue.put((task_id, video["url"], DownloadFormat(fmt), quality, None))
+        queued_count += 1
+
+    sub["last_checked"] = datetime.now().isoformat()
+    sub["last_video_count"] = queued_count
+    save_subscriptions(subs)
+
+    return {
+        "subscription_name": result.get("title", ""),
+        "total_videos": len(result["entries"]),
+        "new_to_download": len(new_videos),
+        "already_downloaded": len(result["entries"]) - len(new_videos),
+        "queued": queued_count,
+        "queue_position": f"{queued_count} videos added to queue (max {MAX_CONCURRENT_DOWNLOADS} concurrent)",
+    }
+
+
+@app.get("/api/queue/status")
+async def queue_status():
+    """Get current download queue status."""
+    return {
+        "pending": download_queue.qsize(),
+        "max_concurrent": MAX_CONCURRENT_DOWNLOADS,
+    }
 
 
 @app.get("/api/files", response_model=list[FileItem])

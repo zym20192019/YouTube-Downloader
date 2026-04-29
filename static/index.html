@@ -1124,6 +1124,9 @@ header p {
             <label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-dim); cursor: pointer;">
               <input type="checkbox" id="subAutoDownload" checked style="accent-color: var(--primary);" /> 自动下载新视频
             </label>
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-dim); cursor: pointer;">
+              <input type="checkbox" id="subDownloadHistory" style="accent-color: var(--accent);" /> 📥 下载全部历史视频
+            </label>
           </div>
           <div style="display: flex; gap: 8px;">
             <button class="btn btn-sm btn-primary" onclick="saveSubscription()">保存</button>
@@ -1386,6 +1389,7 @@ function renderSubscriptions(subs) {
         <div style="font-size: 0.8rem; color: var(--text-dim); margin-top: 4px;">上次检查: ${checked} · 发现新视频: ${count} 个</div>
         <div class="task-actions" style="margin-top: 8px;">
           <button class="btn btn-sm btn-primary" onclick="checkSubscription('${s.id}')">🔍 检查更新</button>
+          <button class="btn btn-sm btn-success" onclick="triggerDownloadHistory('${s.id}')">📥 下载历史</button>
           <button class="btn btn-sm" onclick="editSubscription('${s.id}', '${url.replace(/'/g, "\\'")}', '${name.replace(/'/g, "\\'")}', ${auto})">✏️ 编辑</button>
           <button class="btn btn-sm btn-danger" onclick="deleteSubscription('${s.id}')">🗑 删除</button>
         </div>
@@ -1401,6 +1405,7 @@ function showAddSubscription() {
   document.getElementById('subUrlInput').value = '';
   document.getElementById('subNameInput').value = '';
   document.getElementById('subAutoDownload').checked = true;
+  document.getElementById('subDownloadHistory').checked = false;
   document.getElementById('subscriptionForm').style.display = 'block';
 }
 
@@ -1410,6 +1415,7 @@ function editSubscription(id, url, name, auto) {
   document.getElementById('subUrlInput').value = url;
   document.getElementById('subNameInput').value = name;
   document.getElementById('subAutoDownload').checked = auto;
+  document.getElementById('subDownloadHistory').checked = false; // Only on creation
   document.getElementById('subscriptionForm').style.display = 'block';
 }
 
@@ -1422,6 +1428,7 @@ async function saveSubscription() {
   const url = document.getElementById('subUrlInput').value.trim();
   const name = document.getElementById('subNameInput').value.trim();
   const auto = document.getElementById('subAutoDownload').checked;
+  const downloadHistory = document.getElementById('subDownloadHistory').checked;
   if (!url) {
     showToast('请输入频道 URL', 'error');
     return;
@@ -1441,6 +1448,18 @@ async function saveSubscription() {
         body: JSON.stringify({ id: '', url, name, auto_download: auto, format: 'best' }),
       });
       showToast('订阅已添加', 'success');
+      // If user checked "download all history", trigger it
+      if (downloadHistory) {
+        // Need to get the ID of the newly created subscription
+        const res = await authFetch(`${API}/api/subscriptions`);
+        if (res.ok) {
+          const subs = await res.json();
+          const newSub = subs.find(s => s.url === url);
+          if (newSub) {
+            await triggerDownloadHistory(newSub.id);
+          }
+        }
+      }
     }
     hideSubscriptionForm();
     loadSubscriptions();
@@ -1468,12 +1487,29 @@ async function checkSubscription(id) {
     if (data.error) {
       showToast('检查失败: ' + data.error, 'error');
     } else {
-      const msg = `发现 ${data.new_videos} 个新视频` + (data.downloaded.length > 0 ? `，已下载 ${data.downloaded.length} 个` : '');
+      const msg = `发现 ${data.new_videos} 个新视频` + (data.queued > 0 ? `，已加入队列 ${data.queued} 个` : '');
       showToast(msg, data.new_videos > 0 ? 'success' : 'info');
     }
     loadSubscriptions();
   } catch (e) {
     showToast('检查失败: ' + e.message, 'error');
+  }
+}
+
+async function triggerDownloadHistory(id) {
+  if (!confirm('将下载此频道全部历史视频（去重已下载的），加入队列逐个下载。\n确定继续？')) return;
+  showToast('正在获取频道视频列表...', 'info');
+  try {
+    const res = await authFetch(`${API}/api/subscriptions/${id}/download-history`, { method: 'POST' });
+    const data = await res.json();
+    if (data.error) {
+      showToast('失败: ' + data.error, 'error');
+    } else {
+      showToast(`已添加 ${data.queued} 个视频到下载队列（同时最多 ${data.queue_position.includes('3') ? '3' : '3'} 个并发）`, 'success');
+    }
+    loadSubscriptions();
+  } catch (e) {
+    showToast('失败: ' + e.message, 'error');
   }
 }
 
