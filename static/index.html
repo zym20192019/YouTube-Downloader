@@ -630,6 +630,53 @@ header p {
   color: var(--primary-light);
 }
 
+/* Search / Filter bar */
+.filter-bar {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.filter-search {
+  flex: 1;
+  min-width: 160px;
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 8px 14px;
+  color: var(--text);
+  font-size: 0.9rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+.filter-search:focus {
+  border-color: var(--primary);
+}
+.filter-search::placeholder {
+  color: var(--text-dim);
+}
+.filter-select {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 8px 12px;
+  color: var(--text);
+  font-size: 0.85rem;
+  outline: none;
+  cursor: pointer;
+  min-width: 110px;
+}
+.filter-select option {
+  background: #1a1a2e;
+  color: var(--text);
+}
+.filter-count {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
 /* Task with thumbnail */
 .task-item-with-thumb {
   display: flex;
@@ -943,6 +990,21 @@ header p {
         <h2>下载任务</h2>
         <span class="count" id="taskCount">0 个任务</span>
       </div>
+      <div class="filter-bar">
+        <div style="flex: 1; min-width: 160px; position: relative;">
+          <input type="text" class="filter-search" id="taskSearchInput" placeholder="🔍 搜索标题或链接..." oninput="onTaskFilterChange()" style="width: 100%; padding-right: 36px;" />
+          <span id="taskSearchClear" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; color: var(--text-dim); font-size: 1rem; display: none;" onclick="clearTaskSearch()">✕</span>
+        </div>
+        <select class="filter-select" id="taskStatusFilter" onchange="onTaskFilterChange()">
+          <option value="">全部状态</option>
+          <option value="queued">排队中</option>
+          <option value="downloading">下载中</option>
+          <option value="done">已完成</option>
+          <option value="error">失败</option>
+          <option value="moving">移动中</option>
+          <option value="moved">已转存</option>
+        </select>
+      </div>
       <div id="taskList">
         <div class="empty-state">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
@@ -980,6 +1042,9 @@ header p {
         <h2>已下载文件</h2>
         <span class="count" id="fileCount">0 个文件</span>
       </div>
+      <div class="filter-bar">
+        <input type="text" class="filter-search" id="fileSearchInput" placeholder="🔍 搜索文件名..." oninput="onFileFilterChange()" />
+      </div>
       <div id="fileList">
         <div class="empty-state">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
@@ -1006,6 +1071,43 @@ const WS_CONNECTIONS = {};
 let MOVE_PATHS = [];
 let authToken = localStorage.getItem('yt_dl_token') || '';
 let showThumbnails = localStorage.getItem('yt_dl_thumbnails') === 'true';
+
+// Search / Filter state
+let filterTaskQ = '';
+let filterTaskStatus = '';
+let filterFileQ = '';
+let filterTimeout = null;
+
+function onTaskFilterChange() {
+  clearTimeout(filterTimeout);
+  // Show/hide clear button
+  const clearBtn = document.getElementById('taskSearchClear');
+  if (clearBtn) {
+    clearBtn.style.display = document.getElementById('taskSearchInput').value.trim() ? 'inline' : 'none';
+  }
+  filterTimeout = setTimeout(() => {
+    filterTaskQ = document.getElementById('taskSearchInput').value.trim();
+    filterTaskStatus = document.getElementById('taskStatusFilter').value;
+    loadTasks();
+  }, 300); // debounce 300ms
+}
+
+function clearTaskSearch() {
+  document.getElementById('taskSearchInput').value = '';
+  document.getElementById('taskStatusFilter').value = '';
+  filterTaskQ = '';
+  filterTaskStatus = '';
+  document.getElementById('taskSearchClear').style.display = 'none';
+  loadTasks();
+}
+
+function onFileFilterChange() {
+  clearTimeout(filterTimeout);
+  filterTimeout = setTimeout(() => {
+    filterFileQ = document.getElementById('fileSearchInput').value.trim();
+    loadFiles();
+  }, 300);
+}
 
 // Initialize thumbnail toggle state on load
 function initThumbnailToggle() {
@@ -1442,7 +1544,11 @@ async function loadMovePaths() {
 async function loadTasks() {
   await loadMovePaths();  // Load paths first
   try {
-    const res = await authFetch(`${API}/api/tasks`);
+    const params = new URLSearchParams();
+    if (filterTaskQ) params.set('q', filterTaskQ);
+    if (filterTaskStatus) params.set('status', filterTaskStatus);
+    const url = `${API}/api/tasks${params.toString() ? '?' + params.toString() : ''}`;
+    const res = await authFetch(url);
     if (!res) return;
     const data = await res.json();
     renderTasks(data.tasks);
@@ -1465,13 +1571,17 @@ function renderTasks(tasks) {
         if (!Array.isArray(tasks)) tasks = [];
         const container = document.getElementById('taskList');
         const countEl = document.getElementById('taskCount');
-        if (countEl) countEl.textContent = tasks.length + ' 个任务';
+        const hasFilter = filterTaskQ || filterTaskStatus;
+        if (countEl) {
+            countEl.textContent = tasks.length + ' 个任务' + (hasFilter ? ' (筛选结果)' : '');
+        }
 
         if (tasks.length === 0) {
+            const hasFilter = filterTaskQ || filterTaskStatus;
             container.innerHTML = `
               <div class="empty-state">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-                <p>还没有下载任务，粘贴链接开始吧</p>
+                ${hasFilter ? '<p>没有匹配的任务，请调整搜索条件</p>' : '<p>还没有下载任务，粘贴链接开始吧</p>'}
               </div>`;
             return;
         }
@@ -1727,7 +1837,10 @@ function backToTaskList() {
 // Load files
 async function loadFiles() {
   try {
-    const res = await authFetch(`${API}/api/files`);
+    const params = new URLSearchParams();
+    if (filterFileQ) params.set('q', filterFileQ);
+    const url = `${API}/api/files${params.toString() ? '?' + params.toString() : ''}`;
+    const res = await authFetch(url);
     const files = await res.json();
     renderFiles(files);
   } catch (e) {

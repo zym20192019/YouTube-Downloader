@@ -225,8 +225,18 @@ async def get_playlist_tasks(playlist_id: str):
 
 
 @app.get("/api/tasks", response_model=TaskListResponse)
-async def list_tasks():
+async def list_tasks(
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+):
     tasks = task_manager.list_tasks()
+    # Filter by search query (title or URL)
+    if q:
+        q_lower = q.lower()
+        tasks = [t for t in tasks if q_lower in (t.get("title") or "").lower() or q_lower in (t.get("url") or "").lower()]
+    # Filter by status
+    if status:
+        tasks = [t for t in tasks if t.get("status") == status]
     return TaskListResponse(
         tasks=[TaskResponse(**t) for t in tasks],
         total=len(tasks),
@@ -281,7 +291,9 @@ async def move_file(req: MoveRequest):
 
 
 @app.get("/api/files", response_model=list[FileItem])
-async def list_files():
+async def list_files(
+    q: Optional[str] = None,
+):
     files = []
     tasks = task_manager.list_tasks()
     for task in tasks:
@@ -301,6 +313,10 @@ async def list_files():
                     created_at=task["created_at"],
                     cloud_path=task.get("cloud_path"),
                 ))
+    # Filter by search query (title)
+    if q:
+        q_lower = q.lower()
+        files = [f for f in files if q_lower in (f.title or "").lower()]
     return files
 
 
