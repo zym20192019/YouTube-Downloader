@@ -1043,7 +1043,8 @@ header p {
   <!-- Tabs -->
   <div class="tabs" style="display: flex; align-items: center; justify-content: space-between;">
     <div style="display: flex; gap: 4px;">
-      <button class="tab active" onclick="switchTab('tasks', this)">📋 下载队列</button>
+      <button class="tab active" onclick="switchTab('tasks', this)">📋 单个下载</button>
+      <button class="tab" onclick="switchTab('playlists', this)">📁 播放列表</button>
       <button class="tab" onclick="switchTab('subscriptions', this)">📺 订阅</button>
       <button class="tab" onclick="switchTab('files', this)">📁 已下载文件</button>
     </div>
@@ -1053,11 +1054,11 @@ header p {
     </div>
   </div>
 
-  <!-- Tasks Tab -->
+  <!-- Tasks Tab (Individual Downloads) -->
   <div class="tab-content active" id="tasksTab">
     <div class="glass">
       <div class="section-header">
-        <h2>下载任务</h2>
+        <h2>单个下载任务</h2>
         <span class="count" id="taskCount">0 个任务</span>
       </div>
       <div class="filter-bar">
@@ -1079,7 +1080,30 @@ header p {
       <div id="taskList">
         <div class="empty-state">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
-          <p>还没有下载任务，粘贴链接开始吧</p>
+          <p>还没有单个下载任务</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Playlists Tab -->
+  <div class="tab-content" id="playlistsTab" style="display: none;">
+    <div class="glass">
+      <div class="section-header">
+        <h2>播放列表下载</h2>
+        <span class="count" id="playlistCount">0 个播放列表</span>
+      </div>
+      <div class="filter-bar">
+        <div style="flex: 1; min-width: 160px; position: relative;">
+          <input type="text" class="filter-search" id="playlistSearchInput" placeholder="🔍 搜索播放列表..." oninput="onPlaylistFilterChange()" style="width: 100%; padding-right: 36px;" />
+          <span id="playlistSearchClear" style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); cursor: pointer; color: var(--text-dim); font-size: 1rem; display: none;" onclick="clearPlaylistSearch()">✕</span>
+        </div>
+        <button class="btn btn-sm" id="selectAllPlaylistBtn" onclick="toggleSelectAllPlaylists()" style="display: none; white-space: nowrap;">☑️ 全选</button>
+      </div>
+      <div id="playlistList">
+        <div class="empty-state">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg>
+          <p>还没有播放列表下载任务</p>
         </div>
       </div>
     </div>
@@ -1112,6 +1136,10 @@ header p {
       <div class="section-header">
         <h2>频道订阅</h2>
         <button class="btn btn-sm btn-primary" onclick="showAddSubscription()">➕ 添加订阅</button>
+      </div>
+      <div class="filter-bar">
+        <input type="text" class="filter-search" id="subSearchInput" placeholder="🔍 搜索订阅..." oninput="onSubFilterChange()" />
+        <button class="btn btn-sm" id="selectAllSubBtn" onclick="toggleSelectAllSubs()" style="display: none; white-space: nowrap;">☑️ 全选</button>
       </div>
 
       <!-- Add/Edit Form (hidden by default) -->
@@ -1164,6 +1192,19 @@ header p {
   </div>
 </div>
 
+<!-- Playlist Detail Modal -->
+<div class="modal-overlay" id="playlistModal" style="display: none;">
+  <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto; padding: 24px;" onclick="event.stopPropagation();">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+      <h3 id="playlistModalTitle" style="margin: 0; font-size: 1.1rem;"></h3>
+      <button onclick="closePlaylistModal()" style="background: none; border: none; color: var(--text-dim); font-size: 1.5rem; cursor: pointer; line-height: 1;">&times;</button>
+    </div>
+    <div id="playlistModalMeta" style="font-size: 0.85rem; color: var(--text-dim); margin-bottom: 16px;"></div>
+    <div id="playlistModalProgress" style="margin-bottom: 16px;"></div>
+    <div id="playlistModalChildren"></div>
+  </div>
+</div>
+
 <!-- Batch Action Bar -->
 <div class="batch-bar" id="batchBar" style="display: none;">
   <span class="batch-count" id="batchCount">已选 0 项</span>
@@ -1198,6 +1239,15 @@ let filterTimeout = null;
 
 // Batch selection state
 const SELECTED_TASKS = new Set();
+
+// Playlist tab state
+let PLAYLISTS = {};
+const SELECTED_PLAYLISTS = new Set();
+let filterPlaylistQ = '';
+
+// Subscription tab state
+const SELECTED_SUBS = new Set();
+let filterSubQ = '';
 
 function onTaskFilterChange() {
   clearTimeout(filterTimeout);
@@ -1471,11 +1521,13 @@ async function saveSubscription() {
 async function deleteSubscription(id) {
   if (!confirm('确定删除此订阅？')) return;
   try {
-    await authFetch(`${API}/api/subscriptions/${id}`, { method: 'DELETE' });
+    await authFetch(API + '/api/subscriptions/' + id, { method: 'DELETE' });
+    SELECTED_SUBS.delete(id);
+    updateSubBatchBar();
     showToast('订阅已删除', 'info');
     loadSubscriptions();
   } catch (e) {
-    showToast('删除失败', 'error');
+    showToast('删除失败: ' + e.message, 'error');
   }
 }
 
@@ -1652,9 +1704,30 @@ function switchTab(tab, btn) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   btn.classList.add('active');
-  document.getElementById(tab + 'Tab').classList.add('active');
+  // Clear selection when switching tabs
+  SELECTED_TASKS.clear();
+  SELECTED_PLAYLISTS.clear();
+  SELECTED_SUBS.clear();
+  document.getElementById('batchBar').style.display = 'none';
+  document.body.style.paddingBottom = '0';
+  // Hide all select all buttons
+  var selectAllBtn = document.getElementById('selectAllBtn');
+  if (selectAllBtn) selectAllBtn.style.display = 'none';
+  var selectAllPlBtn = document.getElementById('selectAllPlaylistBtn');
+  if (selectAllPlBtn) selectAllPlBtn.style.display = 'none';
+  var selectAllSubBtn = document.getElementById('selectAllSubBtn');
+  if (selectAllSubBtn) selectAllSubBtn.style.display = 'none';
+  // Activate tab content
+  var tabEl = document.getElementById(tab + 'Tab');
+  if (tabEl) {
+    tabEl.classList.add('active');
+    tabEl.style.display = '';
+  }
+  // Load data
   if (tab === 'files') loadFiles();
   if (tab === 'subscriptions') loadSubscriptions();
+  if (tab === 'playlists') loadPlaylists();
+  if (tab === 'tasks') loadTasks();
 }
 
 // Toast notifications
@@ -2493,6 +2566,326 @@ if ('serviceWorker' in navigator) {
       .catch((err) => console.log('SW registration failed:', err));
   });
 }
+
+
+// ── Playlist Tab Functions ──────────────────────────────────────────────
+
+async function loadPlaylists() {
+  try {
+    const params = new URLSearchParams();
+    if (filterPlaylistQ) params.set('q', filterPlaylistQ);
+    const res = await authFetch(`${API}/api/playlists?${params}`);
+    if (!res) return;
+    const data = await res.json();
+    // Store for rendering
+    window._playlistsData = data.playlists;
+    renderPlaylists(data.playlists);
+  } catch (e) {
+    console.error('Failed to load playlists:', e);
+  }
+}
+
+function renderPlaylists(playlists) {
+  const container = document.getElementById('playlistList');
+  const countEl = document.getElementById('playlistCount');
+  if (!playlists || playlists.length === 0) {
+    container.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="9" y1="21" x2="9" y2="9"/></svg><p>还没有播放列表下载任务</p></div>';
+    if (countEl) countEl.textContent = '0 个播放列表';
+    return;
+  }
+  if (countEl) countEl.textContent = playlists.length + ' 个播放列表';
+
+  const html = playlists.map(function(pl) {
+    var pct = pl.total_count > 0 ? Math.round(pl.completed_count / pl.total_count * 100) : 0;
+    var isSelected = SELECTED_PLAYLISTS.has(pl.task_id);
+    var statusLabels = {queued: '⏳ 排队中', downloading: '📥 下载中', done: '✅ 已完成', error: '❌ 失败', moving: '🔄 移动中', moved: '📦 已转存'};
+    var statusLabel = statusLabels[pl.status] || pl.status;
+    var borderColor = isSelected ? 'var(--primary)' : 'var(--glass-border)';
+    var checkmark = isSelected ? '☑️' : '☐';
+
+    return [
+      '<div class="playlist-card" data-pl-id="' + pl.task_id + '" style="margin-bottom: 8px; padding: 12px 16px; background: var(--glass-bg); border-radius: 12px; border: 1px solid ' + borderColor + '; cursor: pointer; transition: border-color 0.2s;" onclick="openPlaylistModal(\'' + pl.task_id + '\')">',
+      '  <div style="display: flex; align-items: center; gap: 12px;">',
+      '    <span class="pl-checkbox ' + (isSelected ? 'selected' : '') + '" onclick="event.stopPropagation(); togglePlaylistSelect(\'' + pl.task_id + '\')" style="cursor: pointer; font-size: 1.1rem; flex-shrink: 0;">' + checkmark + '</span>',
+      '    <div style="flex: 1; min-width: 0;">',
+      '      <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">',
+      '        <div class="task-title" style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + escapeHtml(pl.title) + '</div>',
+      '        <span class="status-badge ' + pl.status + '">' + statusLabel + '</span>',
+      '      </div>',
+      '      <div class="task-url" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">' + escapeHtml(pl.url) + '</div>',
+      '      <div style="margin-top: 6px; display: flex; align-items: center; gap: 8px;">',
+      '        <div style="flex: 1; height: 6px; background: rgba(255,255,255,0.1); border-radius: 3px; overflow: hidden;">',
+      '          <div style="width: ' + pct + '%; height: 100%; background: ' + (pct >= 100 ? 'var(--success)' : 'var(--primary)') + '; border-radius: 3px; transition: width 0.3s;"></div>',
+      '        </div>',
+      '        <span style="font-size: 0.8rem; color: var(--text-dim); white-space: nowrap;">' + pl.completed_count + '/' + pl.total_count + '</span>',
+      '      </div>',
+      '    </div>',
+      '    <div class="pl-actions" style="display: flex; gap: 4px; flex-shrink: 0;">',
+      pl.status === 'done' ? '<button class="btn btn-sm btn-success pl-action" onclick="event.stopPropagation(); movePlaylist(\'' + pl.task_id + '\')">📦 转存</button>' : '',
+      '      <button class="btn btn-sm btn-danger pl-action" onclick="event.stopPropagation(); deletePlaylist(\'' + pl.task_id + '\')">🗑</button>',
+      '    </div>',
+      '  </div>',
+      '</div>'
+    ].join('');
+  }).join('');
+  container.innerHTML = html;
+  updatePlaylistBatchBar();
+}
+
+function escapeHtml(text) {
+  var div = document.createElement('div');
+  div.textContent = text || '';
+  return div.innerHTML;
+}
+
+function togglePlaylistSelect(id) {
+  if (SELECTED_PLAYLISTS.has(id)) {
+    SELECTED_PLAYLISTS.delete(id);
+  } else {
+    SELECTED_PLAYLISTS.add(id);
+  }
+  updatePlaylistBatchBar();
+  // Re-render to update checkbox states
+  var data = window._playlistsData || [];
+  renderPlaylists(data);
+}
+
+function toggleSelectAllPlaylists() {
+  var data = window._playlistsData || [];
+  var allIds = data.map(function(p) { return p.task_id; });
+  var allSelected = allIds.every(function(id) { return SELECTED_PLAYLISTS.has(id); });
+  if (allSelected) {
+    allIds.forEach(function(id) { SELECTED_PLAYLISTS.delete(id); });
+  } else {
+    allIds.forEach(function(id) { SELECTED_PLAYLISTS.add(id); });
+  }
+  updatePlaylistBatchBar();
+  renderPlaylists(data);
+}
+
+function updatePlaylistBatchBar() {
+  var bar = document.getElementById('batchBar');
+  var countEl = document.getElementById('batchCount');
+  var selectAllBtn = document.getElementById('selectAllPlaylistBtn');
+  var moveBtns = document.getElementById('batchMoveBtns');
+  var count = SELECTED_PLAYLISTS.size;
+  if (count === 0) {
+    bar.style.display = 'none';
+    if (selectAllBtn) selectAllBtn.style.display = 'none';
+    document.body.style.paddingBottom = '0';
+    return;
+  }
+  bar.style.display = 'flex';
+  if (selectAllBtn) selectAllBtn.style.display = 'inline-block';
+  countEl.textContent = '已选 ' + count + ' 个播放列表 (点击取消)';
+  countEl.style.cursor = 'pointer';
+  countEl.onclick = function() { SELECTED_PLAYLISTS.clear(); updatePlaylistBatchBar(); loadPlaylists(); };
+  document.body.style.paddingBottom = '60px';
+  var paths = Array.isArray(MOVE_PATHS) ? MOVE_PATHS : [];
+  moveBtns.innerHTML = paths.map(function(p) {
+    var n = p.name || 'Path';
+    var pa = p.path || '';
+    var i = p.icon || '📦';
+    return '<button class="btn btn-sm btn-success" onclick="batchMovePlaylists(\'' + pa + '\', \'' + n.replace(/'/g, "\\'") + '\')">' + i + ' 移到' + n + '</button>';
+  }).join('');
+}
+
+async function batchMovePlaylists(targetPath, targetName) {
+  var ids = Array.from(SELECTED_PLAYLISTS);
+  if (ids.length === 0) return;
+  showToast('正在移动 ' + ids.length + ' 个播放列表的文件...', 'info');
+  try {
+    var res = await authFetch(API + '/api/playlists/batch-move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: ids, target_path: targetPath, target_name: targetName }),
+    });
+    var data = await res.json();
+    SELECTED_PLAYLISTS.clear();
+    updatePlaylistBatchBar();
+    showToast('批量移动完成：成功 ' + data.success + '，失败 ' + data.failed, data.failed > 0 ? 'error' : 'success');
+    loadPlaylists();
+    loadFiles();
+  } catch (e) {
+    showToast('批量移动失败: ' + e.message, 'error');
+  }
+}
+
+async function deletePlaylist(id) {
+  if (!confirm('确定删除此播放列表及其所有子任务？')) return;
+  try {
+    await authFetch(API + '/api/playlists/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: [id] }),
+    });
+    SELECTED_PLAYLISTS.delete(id);
+    updatePlaylistBatchBar();
+    showToast('播放列表已删除', 'success');
+    loadPlaylists();
+    loadTasks();
+  } catch (e) {
+    showToast('删除失败: ' + e.message, 'error');
+  }
+}
+
+async function movePlaylist(id) {
+  if (MOVE_PATHS.length === 0) {
+    showToast('请先配置转存路径', 'error');
+    return;
+  }
+  var p = MOVE_PATHS[0];
+  showToast('正在转存到 ' + p.name + '...', 'info');
+  try {
+    var res = await authFetch(API + '/api/playlists/batch-move', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: [id], target_path: p.path, target_name: p.name }),
+    });
+    var data = await res.json();
+    showToast('转存完成：成功 ' + data.success + '，失败 ' + data.failed, data.failed > 0 ? 'error' : 'success');
+    loadPlaylists();
+    loadFiles();
+  } catch (e) {
+    showToast('转存失败: ' + e.message, 'error');
+  }
+}
+
+// Playlist detail modal
+async function openPlaylistModal(playlistId) {
+  var modal = document.getElementById('playlistModal');
+  modal.style.display = 'flex';
+  document.getElementById('playlistModalTitle').textContent = '加载中...';
+  document.getElementById('playlistModalMeta').textContent = '';
+  document.getElementById('playlistModalProgress').innerHTML = '';
+  document.getElementById('playlistModalChildren').innerHTML = '<div class="empty-state"><p>加载子任务中...</p></div>';
+
+  try {
+    var res = await authFetch(API + '/api/playlists/' + playlistId + '/details');
+    if (!res) { modal.style.display = 'none'; return; }
+    var data = await res.json();
+    var pl = data.playlist;
+    var children = data.children;
+    var total = data.total;
+    var completed = children.filter(function(c) { return c.status === 'done' || c.status === 'moved'; }).length;
+    var pct = total > 0 ? Math.round(completed / total * 100) : 0;
+
+    document.getElementById('playlistModalTitle').textContent = pl.title || '播放列表';
+    document.getElementById('playlistModalMeta').innerHTML = '<a href="' + escapeHtml(pl.url) + '" target="_blank" style="color: var(--primary); text-decoration: none;">' + escapeHtml(pl.url) + '</a>';
+    document.getElementById('playlistModalProgress').innerHTML = [
+      '<div style="display: flex; align-items: center; gap: 12px;">',
+      '  <div style="flex: 1; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden;">',
+      '    <div style="width: ' + pct + '%; height: 100%; background: var(--primary); border-radius: 4px;"></div>',
+      '  </div>',
+      '  <span style="font-size: 0.9rem; font-weight: 600;">' + completed + '/' + total + ' (' + pct + '%)</span>',
+      '</div>'
+    ].join('');
+
+    var statusLabels = {queued: '⏳ 排队中', downloading: '📥 下载中', done: '✅ 已完成', error: '❌ 失败', moving: '🔄 移动中', moved: '📦 已转存'};
+    var childHtml = children.map(function(c) {
+      return '<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--glass-border); gap: 8px;">' +
+        '<span class="status-badge ' + c.status + '" style="flex-shrink: 0;">' + (statusLabels[c.status] || c.status) + '</span>' +
+        '<span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem;">' + escapeHtml(c.title || 'Unknown') + '</span>' +
+        (c.speed ? '<span style="color: var(--text-dim); font-size: 0.8rem; flex-shrink: 0;">' + c.speed + '</span>' : '') +
+        '</div>';
+    }).join('');
+    document.getElementById('playlistModalChildren').innerHTML = childHtml || '<div class="empty-state"><p>暂无子任务</p></div>';
+  } catch (e) {
+    document.getElementById('playlistModalTitle').textContent = '加载失败';
+    document.getElementById('playlistModalChildren').innerHTML = '<div class="empty-state"><p>' + e.message + '</p></div>';
+  }
+}
+
+function closePlaylistModal() {
+  document.getElementById('playlistModal').style.display = 'none';
+}
+
+// Playlist search
+function onPlaylistFilterChange() {
+  clearTimeout(filterTimeout);
+  var clearBtn = document.getElementById('playlistSearchClear');
+  var input = document.getElementById('playlistSearchInput');
+  if (clearBtn && input) clearBtn.style.display = input.value.trim() ? 'inline' : 'none';
+  filterTimeout = setTimeout(function() {
+    filterPlaylistQ = input.value.trim();
+    loadPlaylists();
+  }, 300);
+}
+
+function clearPlaylistSearch() {
+  var input = document.getElementById('playlistSearchInput');
+  if (input) input.value = '';
+  filterPlaylistQ = '';
+  var clearBtn = document.getElementById('playlistSearchClear');
+  if (clearBtn) clearBtn.style.display = 'none';
+  loadPlaylists();
+}
+
+// ── Subscription Tab Enhancements ──────────────────────────────────────
+
+function onSubFilterChange() {
+  clearTimeout(filterTimeout);
+  filterTimeout = setTimeout(function() {
+    filterSubQ = document.getElementById('subSearchInput').value.trim();
+    loadSubscriptions();
+  }, 300);
+}
+
+function toggleSelectAllSubs() {
+  var allCards = document.querySelectorAll('.sub-card');
+  var allIds = [];
+  allCards.forEach(function(el) {
+    var id = el.getAttribute('data-sub-id');
+    if (id) allIds.push(id);
+  });
+  var allSelected = allIds.every(function(id) { return SELECTED_SUBS.has(id); });
+  if (allSelected) {
+    allIds.forEach(function(id) { SELECTED_SUBS.delete(id); });
+  } else {
+    allIds.forEach(function(id) { SELECTED_SUBS.add(id); });
+  }
+  // Re-render
+  loadSubscriptions();
+}
+
+function toggleSubSelect(id) {
+  if (SELECTED_SUBS.has(id)) {
+    SELECTED_SUBS.delete(id);
+  } else {
+    SELECTED_SUBS.add(id);
+  }
+  updateSubBatchBar();
+  // Re-render
+  loadSubscriptions();
+}
+
+function updateSubBatchBar() {
+  var count = SELECTED_SUBS.size;
+  var selectAllBtn = document.getElementById('selectAllSubBtn');
+  if (count === 0) {
+    if (selectAllBtn) selectAllBtn.style.display = 'none';
+  } else {
+    if (selectAllBtn) selectAllBtn.style.display = 'inline-block';
+  }
+}
+
+async function batchDeleteSubscriptions(ids) {
+  try {
+    var res = await authFetch(API + '/api/subscriptions/batch-delete', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: ids }),
+    });
+    var data = await res.json();
+    SELECTED_SUBS.clear();
+    updateSubBatchBar();
+    showToast('删除完成：成功 ' + data.success + '，失败 ' + data.failed, data.failed > 0 ? 'error' : 'success');
+    loadSubscriptions();
+  } catch (e) {
+    showToast('批量删除失败: ' + e.message, 'error');
+  }
+}
+
 </script>
 
 </body>

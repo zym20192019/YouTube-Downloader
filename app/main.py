@@ -275,7 +275,10 @@ async def list_tasks(
     q: Optional[str] = None,
     status: Optional[str] = None,
 ):
+    """List individual download tasks (excludes playlists)."""
     tasks = task_manager.list_tasks()
+    # Exclude playlist parent tasks
+    tasks = [t for t in tasks if not t.get("is_playlist")]
     # Filter by search query (title or URL)
     if q:
         q_lower = q.lower()
@@ -287,6 +290,182 @@ async def list_tasks(
         tasks=[TaskResponse(**t) for t in tasks],
         total=len(tasks),
     )
+
+
+class PlaylistSummary(BaseModel):
+    task_id: str
+    title: str
+    url: str
+    status: str
+    progress: float
+    completed_count: int
+    total_count: int
+    created_at: str
+    thumbnail: Optional[str] = None
+
+
+class PlaylistListResponse(BaseModel):
+    playlists: list[PlaylistSummary]
+    total: int
+
+
+@app.get("/api/playlists", response_model=PlaylistListResponse)
+async def list_playlists(
+    q: Optional[str] = None,
+    status: Optional[str] = None,
+):
+    """List playlist parent tasks with progress summary."""
+    tasks = task_manager.list_tasks()
+    # Only playlist parent tasks
+    playlists = [t for t in tasks if t.get("is_playlist")]
+    if q:
+        q_lower = q.lower()
+        playlists = [t for t in playlists if q_lower in (t.get("title") or "").lower() or q_lower in (t.get("url") or "").lower()]
+    if status:
+        playlists = [t for t in playlists if t.get("status") == status]
+
+    result = []
+    for pl in playlists:
+        children = task_manager.get_child_tasks(pl["task_id"])
+        total = len(children)
+        completed = sum(1 for c in children if c.get("status") in (TaskStatus.DONE, TaskStatus.MOVED))
+        progress = (completed / total * 100) if total > 0 else 0
+        result.append(PlaylistSummary(
+            task_id=pl["task_id"],
+            title=pl.get("title", "Unknown Playlist"),
+            url=pl.get("url", ""),
+            status=pl.get("status", "pending"),
+            progress=round(progress, 1),
+            completed_count=completed,
+            total_count=total,
+            created_at=pl.get("created_at", ""),
+            thumbnail=pl.get("thumbnail"),
+        ))
+
+    return PlaylistListResponse(playlists=result, total=len(result))
+
+
+@app.get("/api/playlists/{playlist_id}/details")
+async def get_playlist_details(playlist_id: str):
+    """Get detailed child tasks for a playlist."""
+    parent = task_manager.get_task(playlist_id)
+    if not parent or not parent.get("is_playlist"):
+        raise HTTPException(status_code=404, detail="Playlist not found")
+
+    children = task_manager.get_child_tasks(playlist_id)
+    return {
+        "playlist": {
+            "task_id": parent["task_id"],
+            "title": parent.get("title"),
+            "url": parent.get("url"),
+            "status": parent.get("status"),
+            "progress": parent.get("progress"),
+        },
+        "children": [
+            {
+                "task_id": c["task_id"],
+                "title": c.get("title", "Unknown"),
+                "url": c.get("url"),
+                "status": c.get("status"),
+                "progress": c.get("progress", 0),
+                "speed": c.get("speed"),
+                "error": c.get("error"),
+                "filepath": c.get("filepath"),
+                "cloud_path": c.get("cloud_path"),
+                "created_at": c.get("created_at"),
+            }
+            for c in children
+        ],
+        "total": len(children),
+    }
+
+
+@app.post("/api/playlists/batch-move")
+async def batch_move_playlists(req: BatchMoveRequest):
+    """Move all child tasks of selected playlists to target directory."""
+    results = {"success": 0, "failed": 0, "details": []}
+    for task_id in req.task_ids:
+        parent = task_manager.get_task(task_id)
+        if not parent or not parent.get("is_playlist"):
+            results["failed"] += 1
+            results["details"].append({"task_id": task_id, "status": "skipped", "reason": "Not a playlist"})
+            continue
+        children = task_manager.get_child_tasks(task_id)
+        for child in children:
+            if not child.get("filepath") or child.get("status") not in (TaskStatus.DONE, TaskStatus.MOVED):
+                continue
+            result = await move_to_cloud_drive(child["task_id"], req.target_path, req.target_name)
+            if result:
+                results["success"] += 1
+                results["details"].append({"task_id": child["task_id"], "playlist_id": task_id, "status": "moved", "path": result[1]})
+            else:
+                results["failed"] += 1
+                results["details"].append({"task_id": child["task_id"], "playlist_id": task_id, "status": "failed"})
+    return results
+
+
+@app.post("/api/playlists/batch-delete")
+async def batch_delete_playlists(req: BatchDeleteRequest):
+    """Delete selected playlists and all their child tasks."""
+    results = {"success": 0, "failed": 0, "details": []}
+    for task_id in req.task_ids:
+        parent = task_manager.get_task(task_id)
+        if not parent or not parent.get("is_playlist"):
+            results["failed"] += 1
+            results["details"].append({"task_id": task_id, "status": "skipped", "reason": "Not a playlist"})
+            continue
+        # Delete child files and tasks
+        children = task_manager.get_child_tasks(task_id)
+        for child in children:
+            if child.get("filepath") and os.path.exists(child["filepath"]):
+                try:
+                    os.remove(child["filepath"])
+                except OSError:
+                    pass
+            task_manager.subscribers.pop(child["task_id"], None)
+            task_manager.delete_task(child["task_id"])
+        # Delete parent
+        task_manager.subscribers.pop(task_id, None)
+        task_manager.delete_task(task_id)
+        results["success"] += 1
+        results["details"].append({"task_id": task_id, "status": "deleted"})
+    return results
+
+
+@app.post("/api/subscriptions/batch-move")
+async def batch_move_subscriptions(req: BatchMoveRequest):
+    """Move downloaded files from selected subscription tasks."""
+    results = {"success": 0, "failed": 0, "details": []}
+    # Find tasks associated with subscription URLs
+    subs = load_subscriptions()
+    sub_urls = {s["id"]: s["url"] for s in subs if s["id"] in req.task_ids}
+    for task in task_manager.list_tasks():
+        if task.get("url") in sub_urls.values() and task.get("filepath") and task.get("status") in (TaskStatus.DONE, TaskStatus.MOVED):
+            result = await move_to_cloud_drive(task["task_id"], req.target_path, req.target_name)
+            if result:
+                results["success"] += 1
+                results["details"].append({"task_id": task["task_id"], "status": "moved", "path": result[1]})
+            else:
+                results["failed"] += 1
+                results["details"].append({"task_id": task["task_id"], "status": "failed"})
+    return results
+
+
+@app.post("/api/subscriptions/batch-delete")
+async def batch_delete_subscriptions(req: BatchDeleteRequest):
+    """Delete subscription entries and their associated tasks."""
+    results = {"success": 0, "failed": 0, "details": []}
+    subs = load_subscriptions()
+    for sub_id in req.task_ids:
+        new_subs = [s for s in subs if s["id"] != sub_id]
+        if len(new_subs) == len(subs):
+            results["failed"] += 1
+            results["details"].append({"task_id": sub_id, "status": "skipped", "reason": "Subscription not found"})
+            continue
+        save_subscriptions(new_subs)
+        results["success"] += 1
+        results["details"].append({"task_id": sub_id, "status": "deleted"})
+    return results
 
 
 @app.get("/api/tasks/{task_id}", response_model=TaskResponse)
