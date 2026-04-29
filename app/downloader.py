@@ -107,17 +107,19 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
         "merge_output_format": "mp4",
         "postprocessors": postprocessors if fmt == DownloadFormat.AUDIO else [],
         "noplaylist": True,
-        "socket_timeout": 60,
-        "retries": 10,
-        "fragment_retries": 10,
+        "socket_timeout": 120,                       # 增加到 2 分钟
+        "retries": 15,                               # 增加重试次数
+        "fragment_retries": 15,                      # 分片重试
         "file_access_retries": 5,
-        "retry_sleep": 2,
-        "buffersize": 1024,
+        "retry_sleep": 5,                            # 重试间隔 5 秒
+        "buffersize": 4096,                          # 增大缓冲区
         "concurrent_fragment_downloads": 4,
-        "js_runtimes": {"node": {}},              # YouTube JS 签名解析
-        "geo_bypass": True,                        # 绕过地理限制
-        "remote_components": ["ejs:github"],       # 下载远程 EJS 挑战脚本
-        "extractor_retries": 3,                    # 提取器重试
+        "hls_use_mpegts": True,                      # HLS 流使用 MPEG-TS（更稳定）
+        "js_runtimes": {"node": {}},
+        "geo_bypass": True,
+        "remote_components": ["ejs:github"],
+        "extractor_retries": 5,
+        "sleep_interval_requests": 0.5,              # 请求间隔防限速
     }
 
     if COOKIE_FILE.exists():
@@ -165,16 +167,16 @@ def datetime_to_timestamp(iso_str: str) -> float:
 
 
 async def download_video(task_id: str, url: str, fmt: DownloadFormat, quality: Optional[str] = None, hdr: Optional[str] = None):
-    """Run yt-dlp download in a thread to not block the event loop."""
+    """Run yt-dlp download in a thread to not block the event loop. Auto-retries on network errors."""
     task_manager.update_task(task_id, status="downloading")
 
     loop = asyncio.get_event_loop()
     ydl_opts = _get_ydl_opts(task_id, fmt, quality, hdr)
+    max_retries = 3
 
     def _download():
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Extract info first
                 info = ydl.extract_info(url, download=False)
                 task_manager.set_metadata(
                     task_id,
@@ -182,23 +184,36 @@ async def download_video(task_id: str, url: str, fmt: DownloadFormat, quality: O
                     thumbnail=info.get("thumbnail"),
                     duration=info.get("duration"),
                 )
-                # Now download
                 ydl.download([url])
         except Exception as e:
             task_manager.set_error(task_id, str(e))
             return False
         return True
 
-    success = await loop.run_in_executor(None, _download)
+    for attempt in range(1, max_retries + 1):
+        # Reset task state before retry
+        if attempt > 1:
+            task_manager.update_task(task_id, status="queued", error=None)
+            task_manager.update_task(task_id, status="downloading")
+            await asyncio.sleep(5 * attempt)  # 5s, 10s, 15s backoff
 
-    if success:
-        # Find the downloaded file
-        result = _find_downloaded_file(task_id)
-        if result:
-            filename, filepath, filesize = result
-            task_manager.set_done(task_id, filename, filepath, filesize)
-        else:
-            task_manager.set_error(task_id, "Download completed but file not found")
+        success = await loop.run_in_executor(None, _download)
+
+        if success:
+            result = _find_downloaded_file(task_id)
+            if result:
+                filename, filepath, filesize = result
+                task_manager.set_done(task_id, filename, filepath, filesize)
+            else:
+                task_manager.set_error(task_id, "Download completed but file not found")
+            return
+
+        # Check if error is retryable (Broken pipe, network issues)
+        task = task_manager.get_task(task_id)
+        error_msg = task.get("error", "") if task else ""
+        if "Broken pipe" not in error_msg and "Connection" not in error_msg and "timeout" not in error_msg.lower():
+            # Non-retryable error, stop trying
+            return
 
 
 async def download_playlist(playlist_id: str, url: str, fmt: DownloadFormat, quality: Optional[str] = None, hdr: Optional[str] = None):

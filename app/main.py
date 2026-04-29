@@ -67,6 +67,9 @@ MAX_CONCURRENT_DOWNLOADS = 3
 DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 download_queue: asyncio.Queue = asyncio.Queue()
 
+# Auto-check subscriptions interval (in seconds)
+SUBSCRIPTION_CHECK_INTERVAL = 3 * 60 * 60  # 3 hours
+
 
 async def download_worker():
     """Background worker that processes queued downloads with max concurrency."""
