@@ -1195,7 +1195,7 @@ header p {
 </div>
 
 <!-- Playlist Detail Modal -->
-<div class="modal-overlay" id="playlistModal" style="display: none;">
+<div class="modal-overlay" id="playlistModal" onclick="closePlaylistModal()">
   <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto; padding: 24px;" onclick="event.stopPropagation();">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
       <h3 id="playlistModalTitle" style="margin: 0; font-size: 1.1rem;"></h3>
@@ -2756,7 +2756,7 @@ async function movePlaylist(id) {
 // Playlist detail modal
 async function openPlaylistModal(playlistId) {
   var modal = document.getElementById('playlistModal');
-  modal.style.display = 'flex';
+  modal.classList.add('active');
   document.getElementById('playlistModalTitle').textContent = '加载中...';
   document.getElementById('playlistModalMeta').textContent = '';
   document.getElementById('playlistModalProgress').innerHTML = '';
@@ -2764,7 +2764,7 @@ async function openPlaylistModal(playlistId) {
 
   try {
     var res = await authFetch(API + '/api/playlists/' + playlistId + '/details');
-    if (!res) { modal.style.display = 'none'; return; }
+    if (!res) { modal.classList.remove('active'); return; }
     var data = await res.json();
     var pl = data.playlist;
     var children = data.children;
@@ -2799,7 +2799,7 @@ async function openPlaylistModal(playlistId) {
 }
 
 function closePlaylistModal() {
-  document.getElementById('playlistModal').style.display = 'none';
+  document.getElementById('playlistModal').classList.remove('active');
 }
 
 // Playlist search
