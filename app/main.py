@@ -330,8 +330,10 @@ async def list_playlists(
     result = []
     for pl in playlists:
         children = task_manager.get_child_tasks(pl["task_id"])
-        total = len(children)
-        completed = sum(1 for c in children if c.get("status") in (TaskStatus.DONE, TaskStatus.MOVED))
+        # 使用 playlist_progress 中记录的总数，避免边下边创建导致总数动态变化 (1/2, 2/3...)
+        pl_prog = pl.get("playlist_progress", {})
+        total = pl_prog.get("total") or len(children)
+        completed = pl_prog.get("current", 0)
         progress = (completed / total * 100) if total > 0 else 0
         result.append(PlaylistSummary(
             task_id=pl["task_id"],
