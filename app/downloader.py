@@ -265,7 +265,7 @@ async def download_playlist(playlist_id: str, url: str, fmt: DownloadFormat, qua
 
     for i, entry in enumerate(playlist_info["entries"]):
         child_id = f"{playlist_id}_{i}"
-        task_manager.create_child_task(child_id, playlist_id, entry["url"], entry["title"], fmt, quality)
+        task_manager.create_child_task(child_id, playlist_id, entry["url"], entry["title"], fmt, quality, thumbnail=entry.get("thumbnail"), duration=entry.get("duration"))
 
         # Download this video with retry on network errors
         child_opts = _get_ydl_opts(child_id, fmt, quality, hdr)

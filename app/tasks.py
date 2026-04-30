@@ -186,7 +186,7 @@ class TaskManager:
         self._save_history()
         return task_id
 
-    def create_child_task(self, task_id: str, parent_id: str, url: str, title: str, fmt: DownloadFormat, quality: Optional[str] = None) -> str:
+    def create_child_task(self, task_id: str, parent_id: str, url: str, title: str, fmt: DownloadFormat, quality: Optional[str] = None, thumbnail: Optional[str] = None, duration: Optional[int] = None) -> str:
         """Create a child task for a playlist video."""
         now = datetime.now().isoformat()
         with self._lock:
@@ -204,8 +204,8 @@ class TaskManager:
                 "filepath": None,
                 "filesize": None,
                 "error": None,
-                "thumbnail": None,
-                "duration": None,
+                "thumbnail": thumbnail,
+                "duration": duration,
                 "created_at": now,
                 "updated_at": now,
                 "cloud_path": None,

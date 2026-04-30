@@ -1196,7 +1196,7 @@ header p {
 
 <!-- Playlist Detail Modal -->
 <div class="modal-overlay" id="playlistModal" onclick="closePlaylistModal()">
-  <div class="modal-content" style="max-width: 800px; max-height: 80vh; overflow-y: auto; padding: 24px;" onclick="event.stopPropagation();">
+  <div class="modal-content" style="max-width: 95vw; width: 900px; max-height: 85vh; overflow-y: auto; padding: 28px;" onclick="event.stopPropagation();">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
       <h3 id="playlistModalTitle" style="margin: 0; font-size: 1.1rem;"></h3>
       <button onclick="closePlaylistModal()" style="background: none; border: none; color: var(--text-dim); font-size: 1.5rem; cursor: pointer; line-height: 1;">&times;</button>
@@ -2810,14 +2810,14 @@ async function openPlaylistModal(playlistId) {
       var thumb = c.thumbnail || '';
       var size = c.filesize ? formatBytes(c.filesize) : '';
       var duration = c.duration ? formatDuration(c.duration) : '';
-      return '<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--glass-border); gap: 10px;">' +
-        (thumb ? '<img src="' + escapeHtml(thumb) + '" style="width: 80px; height: 45px; object-fit: cover; border-radius: 6px; flex-shrink: 0;" onerror="this.style.display=\'none\'">' : '') +
+      return '<div style="display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid var(--glass-border); gap: 14px;">' +
+        (thumb ? '<img src="' + escapeHtml(thumb) + '" style="width: 160px; height: 90px; object-fit: cover; border-radius: 8px; flex-shrink: 0; background: rgba(255,255,255,0.05);" onerror="this.style.display=\'none\'">' : '') +
         '<div style="flex: 1; min-width: 0;">' +
         '  <div style="display: flex; align-items: center; gap: 8px;">' +
         '    <span class="status-badge ' + c.status + '" style="flex-shrink: 0;">' + (statusLabels[c.status] || c.status) + '</span>' +
-        '    <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem;">' + escapeHtml(c.title || 'Unknown') + '</span>' +
+        '    <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.95rem;">' + escapeHtml(c.title || 'Unknown') + '</span>' +
         '  </div>' +
-        '  <div style="display: flex; gap: 8px; margin-top: 4px; font-size: 0.8rem; color: var(--text-dim);">' +
+        '  <div style="display: flex; gap: 12px; margin-top: 8px; font-size: 0.85rem; color: var(--text-dim);">' +
         (size ? '<span>💾 ' + size + '</span>' : '') +
         (duration ? '<span>⏱ ' + duration + '</span>' : '') +
         (c.speed ? '<span>⚡ ' + c.speed + '</span>' : '') +
