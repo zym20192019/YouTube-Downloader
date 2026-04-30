@@ -267,25 +267,43 @@ async def download_playlist(playlist_id: str, url: str, fmt: DownloadFormat, qua
         child_id = f"{playlist_id}_{i}"
         task_manager.create_child_task(child_id, playlist_id, entry["url"], entry["title"], fmt, quality)
 
-        # Download this video
+        # Download this video with retry on network errors
         child_opts = _get_ydl_opts(child_id, fmt, quality, hdr)
-        def _download_single():
-            try:
-                with yt_dlp.YoutubeDL(child_opts) as ydl:
-                    ydl.download([entry["url"]])
-            except Exception as e:
-                task_manager.set_child_error(child_id, str(e))
-                return False
-            return True
+        max_retries = 3
+        success = False
 
-        success = await loop.run_in_executor(None, _download_single)
-        if success:
-            result = _find_downloaded_file(child_id)
-            if result:
-                filename, filepath, filesize = result
-                task_manager.set_child_done(child_id, filename, filepath, filesize)
-        
-        # Update playlist progress
+        for attempt in range(1, max_retries + 1):
+            if attempt > 1:
+                # Reset child task state for retry
+                task_manager.update_task(child_id, status="queued", error=None)
+                task_manager.update_task(child_id, status="downloading")
+                await asyncio.sleep(5 * attempt)  # 5s, 10s, 15s backoff
+
+            def _download_single():
+                try:
+                    with yt_dlp.YoutubeDL(child_opts) as ydl:
+                        ydl.download([entry["url"]])
+                except Exception as e:
+                    task_manager.set_child_error(child_id, str(e))
+                    return False
+                return True
+
+            success = await loop.run_in_executor(None, _download_single)
+
+            if success:
+                result = _find_downloaded_file(child_id)
+                if result:
+                    filename, filepath, filesize = result
+                    task_manager.set_child_done(child_id, filename, filepath, filesize)
+                break
+            else:
+                # Check if error is retryable
+                child_task = task_manager.get_task(child_id)
+                error_msg = child_task.get("error", "") if child_task else ""
+                if "Broken pipe" not in error_msg and "Connection" not in error_msg and "timeout" not in error_msg.lower():
+                    break  # Non-network error, don't retry
+
+        # Update playlist progress whether success or failed
         task_manager.set_playlist_progress(playlist_id, i + 1, total)
 
     task_manager.set_playlist_done(playlist_id)

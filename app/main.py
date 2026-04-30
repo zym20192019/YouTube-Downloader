@@ -278,10 +278,10 @@ async def list_tasks(
     q: Optional[str] = None,
     status: Optional[str] = None,
 ):
-    """List individual download tasks (excludes playlists)."""
+    """List individual download tasks (excludes playlists and child tasks)."""
     tasks = task_manager.list_tasks()
-    # Exclude playlist parent tasks
-    tasks = [t for t in tasks if not t.get("is_playlist")]
+    # Exclude playlist parent tasks and child tasks (which have a parent_id)
+    tasks = [t for t in tasks if not t.get("is_playlist") and not t.get("parent_id")]
     # Filter by search query (title or URL)
     if q:
         q_lower = q.lower()
