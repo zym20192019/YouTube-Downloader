@@ -284,11 +284,47 @@ async def pause_playlist(playlist_id: str):
 
 @app.post("/api/playlist/{playlist_id}/resume")
 async def resume_playlist(playlist_id: str):
-    """Resume a paused playlist."""
-    success = task_manager.resume_playlist(playlist_id)
-    if not success:
-        raise HTTPException(status_code=400, detail="Cannot resume this playlist (not found or not paused)")
-    return {"success": True, "message": "Playlist resumed"}
+    """Resume a paused playlist. Re-starts download coroutine if needed."""
+    from app.downloader import download_playlist, resume_playlist_download
+
+    task = task_manager.get_task(playlist_id)
+    if not task or not task.get("is_playlist"):
+        raise HTTPException(status_code=404, detail="Playlist not found")
+    if task.get("status") != "paused":
+        raise HTTPException(status_code=400, detail="Playlist is not paused")
+
+    # Check if download coroutine is still alive by seeing if there are unfinished child tasks
+    # that haven't been created yet (meaning the loop hasn't reached them)
+    playlist_info = task.get("playlist_info", {})
+    entries = playlist_info.get("entries", [])
+    child_tasks = task_manager.get_child_tasks(playlist_id)
+    created_ids = {c["task_id"] for c in child_tasks}
+
+    # Determine which video index to resume from
+    # Resume from the first video that hasn't been created as a child task yet
+    resume_from = 0
+    for i, entry in enumerate(entries):
+        child_id = f"{playlist_id}_{i}"
+        if child_id not in created_ids:
+            resume_from = i
+            break
+    else:
+        # All child tasks created — resume from where progress left off
+        pl_prog = task.get("playlist_progress", {})
+        resume_from = pl_prog.get("current", 0)
+
+    # Set status to downloading first
+    task_manager.resume_playlist(playlist_id)
+
+    # Re-start the download coroutine from where we left off
+    fmt = task.get("format", "best")
+    quality = task.get("quality")
+    url = task.get("url", "")
+    asyncio.create_task(
+        resume_playlist_download(playlist_id, url, fmt, quality, entries, resume_from)
+    )
+
+    return {"success": True, "message": f"Playlist resumed from video {resume_from + 1}"}
 
 
 @app.get("/api/tasks", response_model=TaskListResponse)
