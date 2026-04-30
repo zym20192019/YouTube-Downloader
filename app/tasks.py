@@ -162,7 +162,7 @@ class TaskManager:
             self.tasks[task_id] = {
                 "task_id": task_id,
                 "url": url,
-                "title": None,
+                "title": "加载中...",
                 "format": fmt,
                 "quality": quality,
                 "status": TaskStatus.QUEUED,
