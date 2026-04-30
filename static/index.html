@@ -2605,6 +2605,24 @@ function renderPlaylists(playlists) {
     var borderColor = isSelected ? 'var(--primary)' : 'var(--glass-border)';
     var checkmark = isSelected ? '☑️' : '☐';
 
+    // 根据子任务状态决定转存按钮
+    var allChildren = pl.completed_count || 0;
+    var allMoved = pl.status === 'moved';
+    var canMove = pl.status === 'done';
+    var moveButtons = '';
+    var paths = Array.isArray(MOVE_PATHS) ? MOVE_PATHS : [];
+    if (canMove && paths.length > 0) {
+      moveButtons = paths.map(function(p) {
+        var n = p.name || 'Path';
+        var pa = p.path || '';
+        var i = p.icon || '📦';
+        var safeName = n.replace(/'/g, "\\'");
+        return '<button class="btn btn-sm btn-success pl-action" onclick="event.stopPropagation(); movePlaylist(\'' + pl.task_id + '\', \'' + pa + '\', \'' + safeName + '\')">' + i + ' ' + n + '</button>';
+      }).join('');
+    } else if (allMoved) {
+      moveButtons = '<span style="color: var(--success); font-size: 0.8rem;">✓ 已转存</span>';
+    }
+
     return [
       '<div class="playlist-card" data-pl-id="' + pl.task_id + '" style="margin-bottom: 8px; padding: 12px 16px; background: var(--glass-bg); border-radius: 12px; border: 1px solid ' + borderColor + '; cursor: pointer; transition: border-color 0.2s;" onclick="openPlaylistModal(\'' + pl.task_id + '\')">',
       '  <div style="display: flex; align-items: center; gap: 12px;">',
@@ -2622,8 +2640,8 @@ function renderPlaylists(playlists) {
       '        <span style="font-size: 0.8rem; color: var(--text-dim); white-space: nowrap;">' + pl.completed_count + '/' + pl.total_count + '</span>',
       '      </div>',
       '    </div>',
-      '    <div class="pl-actions" style="display: flex; gap: 4px; flex-shrink: 0;">',
-      pl.status === 'done' ? '<button class="btn btn-sm btn-success pl-action" onclick="event.stopPropagation(); movePlaylist(\'' + pl.task_id + '\')">📦 转存</button>' : '',
+      '    <div class="pl-actions" style="display: flex; gap: 4px; flex-shrink: 0; align-items: center;">',
+      moveButtons,
       '      <button class="btn btn-sm btn-danger pl-action" onclick="event.stopPropagation(); deletePlaylist(\'' + pl.task_id + '\')">🗑</button>',
       '    </div>',
       '  </div>',
@@ -2731,18 +2749,22 @@ async function deletePlaylist(id) {
   }
 }
 
-async function movePlaylist(id) {
-  if (MOVE_PATHS.length === 0) {
-    showToast('请先配置转存路径', 'error');
-    return;
+async function movePlaylist(id, targetPath, targetName) {
+  if (!targetPath || !targetName) {
+    if (MOVE_PATHS.length === 0) {
+      showToast('请先配置转存路径', 'error');
+      return;
+    }
+    var p = MOVE_PATHS[0];
+    targetPath = p.path;
+    targetName = p.name;
   }
-  var p = MOVE_PATHS[0];
-  showToast('正在转存到 ' + p.name + '...', 'info');
+  showToast('正在转存到 ' + targetName + '...', 'info');
   try {
     var res = await authFetch(API + '/api/playlists/batch-move', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ task_ids: [id], target_path: p.path, target_name: p.name }),
+      body: JSON.stringify({ task_ids: [id], target_path: targetPath, target_name: targetName }),
     });
     var data = await res.json();
     showToast('转存完成：成功 ' + data.success + '，失败 ' + data.failed, data.failed > 0 ? 'error' : 'success');
@@ -2785,10 +2807,22 @@ async function openPlaylistModal(playlistId) {
 
     var statusLabels = {queued: '⏳ 排队中', downloading: '📥 下载中', done: '✅ 已完成', error: '❌ 失败', moving: '🔄 移动中', moved: '📦 已转存'};
     var childHtml = children.map(function(c) {
-      return '<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--glass-border); gap: 8px;">' +
-        '<span class="status-badge ' + c.status + '" style="flex-shrink: 0;">' + (statusLabels[c.status] || c.status) + '</span>' +
-        '<span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem;">' + escapeHtml(c.title || 'Unknown') + '</span>' +
-        (c.speed ? '<span style="color: var(--text-dim); font-size: 0.8rem; flex-shrink: 0;">' + c.speed + '</span>' : '') +
+      var thumb = c.thumbnail || '';
+      var size = c.filesize ? formatBytes(c.filesize) : '';
+      var duration = c.duration ? formatDuration(c.duration) : '';
+      return '<div style="display: flex; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--glass-border); gap: 10px;">' +
+        (thumb ? '<img src="' + escapeHtml(thumb) + '" style="width: 80px; height: 45px; object-fit: cover; border-radius: 6px; flex-shrink: 0;" onerror="this.style.display=\'none\'">' : '') +
+        '<div style="flex: 1; min-width: 0;">' +
+        '  <div style="display: flex; align-items: center; gap: 8px;">' +
+        '    <span class="status-badge ' + c.status + '" style="flex-shrink: 0;">' + (statusLabels[c.status] || c.status) + '</span>' +
+        '    <span style="flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.9rem;">' + escapeHtml(c.title || 'Unknown') + '</span>' +
+        '  </div>' +
+        '  <div style="display: flex; gap: 8px; margin-top: 4px; font-size: 0.8rem; color: var(--text-dim);">' +
+        (size ? '<span>💾 ' + size + '</span>' : '') +
+        (duration ? '<span>⏱ ' + duration + '</span>' : '') +
+        (c.speed ? '<span>⚡ ' + c.speed + '</span>' : '') +
+        '  </div>' +
+        '</div>' +
         '</div>';
     }).join('');
     document.getElementById('playlistModalChildren').innerHTML = childHtml || '<div class="empty-state"><p>暂无子任务</p></div>';

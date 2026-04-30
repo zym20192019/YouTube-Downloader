@@ -378,6 +378,9 @@ async def get_playlist_details(playlist_id: str):
                 "filepath": c.get("filepath"),
                 "cloud_path": c.get("cloud_path"),
                 "created_at": c.get("created_at"),
+                "thumbnail": c.get("thumbnail"),
+                "filesize": c.get("filesize"),
+                "duration": c.get("duration"),
             }
             for c in children
         ],
