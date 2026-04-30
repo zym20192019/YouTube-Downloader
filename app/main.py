@@ -297,13 +297,13 @@ async def list_tasks(
 
 class PlaylistSummary(BaseModel):
     task_id: str
-    title: str
-    url: str
-    status: str
-    progress: float
-    completed_count: int
-    total_count: int
-    created_at: str
+    title: str = "Unknown Playlist"
+    url: str = ""
+    status: str = "pending"
+    progress: float = 0.0
+    completed_count: int = 0
+    total_count: int = 0
+    created_at: str = ""
     thumbnail: Optional[str] = None
 
 
