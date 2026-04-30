@@ -264,6 +264,19 @@ async def download_playlist(playlist_id: str, url: str, fmt: DownloadFormat, qua
     task_manager.set_playlist_progress(playlist_id, 0, total)
 
     for i, entry in enumerate(playlist_info["entries"]):
+        # Check if playlist is paused — wait until resumed
+        while True:
+            pl_task = task_manager.get_task(playlist_id)
+            if pl_task and pl_task.get("status") == "paused":
+                await asyncio.sleep(2)
+                continue
+            break
+
+        # Check if playlist was deleted while paused
+        pl_task = task_manager.get_task(playlist_id)
+        if not pl_task:
+            return
+
         child_id = f"{playlist_id}_{i}"
         task_manager.create_child_task(child_id, playlist_id, entry["url"], entry["title"], fmt, quality, thumbnail=entry.get("thumbnail"), duration=entry.get("duration"))
 

@@ -37,6 +37,7 @@ class TaskStatus(str, Enum):
     ERROR = "error"
     MOVING = "moving"
     MOVED = "moved"
+    PAUSED = "paused"
 
 
 class TaskResponse(BaseModel):

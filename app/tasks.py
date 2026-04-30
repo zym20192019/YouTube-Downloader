@@ -276,6 +276,42 @@ class TaskManager:
                 self.tasks[task_id]["error"] = error
                 self.tasks[task_id]["updated_at"] = datetime.now().isoformat()
         self._save_history()
+
+    def pause_playlist(self, task_id: str) -> bool:
+        """Pause a downloading playlist. Returns True if paused."""
+        with self._lock:
+            task = self.tasks.get(task_id)
+            if not task or not task.get("is_playlist"):
+                return False
+            if task.get("status") not in ("downloading", "queued"):
+                return False
+            task["status"] = TaskStatus.PAUSED
+            task["updated_at"] = datetime.now().isoformat()
+        self._save_history()
+        self._notify(task_id, ProgressMessage(
+            type="paused",
+            task_id=task_id,
+            message="Playlist paused",
+        ))
+        return True
+
+    def resume_playlist(self, task_id: str) -> bool:
+        """Resume a paused playlist. Returns True if resumed."""
+        with self._lock:
+            task = self.tasks.get(task_id)
+            if not task or not task.get("is_playlist"):
+                return False
+            if task.get("status") != "paused":
+                return False
+            task["status"] = "downloading"
+            task["updated_at"] = datetime.now().isoformat()
+        self._save_history()
+        self._notify(task_id, ProgressMessage(
+            type="resumed",
+            task_id=task_id,
+            message="Playlist resumed",
+        ))
+        return True
         self._notify(task_id, ProgressMessage(
             type="error",
             task_id=task_id,

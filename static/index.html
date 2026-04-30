@@ -2600,7 +2600,7 @@ function renderPlaylists(playlists) {
   const html = playlists.map(function(pl) {
     var pct = pl.total_count > 0 ? Math.round(pl.completed_count / pl.total_count * 100) : 0;
     var isSelected = SELECTED_PLAYLISTS.has(pl.task_id);
-    var statusLabels = {queued: '⏳ 排队中', downloading: '📥 下载中', done: '✅ 已完成', error: '❌ 失败', moving: '🔄 移动中', moved: '📦 已转存'};
+    var statusLabels = {queued: '⏳ 排队中', downloading: '📥 下载中', done: '✅ 已完成', error: '❌ 失败', moving: '🔄 移动中', moved: '📦 已转存', paused: '⏸ 已暂停'};
     var statusLabel = statusLabels[pl.status] || pl.status;
     var borderColor = isSelected ? 'var(--primary)' : 'var(--glass-border)';
     var checkmark = isSelected ? '☑️' : '☐';
@@ -2623,6 +2623,14 @@ function renderPlaylists(playlists) {
       moveButtons = '<span style="color: var(--success); font-size: 0.8rem;">✓ 已转存</span>';
     }
 
+    // 暂停/恢复按钮
+    var pauseResumeBtn = '';
+    if (pl.status === 'downloading' || pl.status === 'queued') {
+      pauseResumeBtn = '<button class="btn btn-sm pl-action" style="background: rgba(255,165,0,0.2); color: #ffa500; border: 1px solid rgba(255,165,0,0.3);" onclick="event.stopPropagation(); pausePlaylist(\'' + pl.task_id + '\')">⏸ 暂停</button>';
+    } else if (pl.status === 'paused') {
+      pauseResumeBtn = '<button class="btn btn-sm pl-action" style="background: rgba(34,197,94,0.2); color: #22c55e; border: 1px solid rgba(34,197,94,0.3);" onclick="event.stopPropagation(); resumePlaylist(\'' + pl.task_id + '\')">▶ 继续</button>';
+    }
+
     return [
       '<div class="playlist-card" data-pl-id="' + pl.task_id + '" style="margin-bottom: 8px; padding: 12px 16px; background: var(--glass-bg); border-radius: 12px; border: 1px solid ' + borderColor + '; cursor: pointer; transition: border-color 0.2s;" onclick="openPlaylistModal(\'' + pl.task_id + '\')">',
       '  <div style="display: flex; align-items: center; gap: 12px;">',
@@ -2641,6 +2649,7 @@ function renderPlaylists(playlists) {
       '      </div>',
       '    </div>',
       '    <div class="pl-actions" style="display: flex; gap: 4px; flex-shrink: 0; align-items: center;">',
+      pauseResumeBtn,
       moveButtons,
       '      <button class="btn btn-sm btn-danger pl-action" onclick="event.stopPropagation(); deletePlaylist(\'' + pl.task_id + '\')">🗑</button>',
       '    </div>',
@@ -2731,6 +2740,26 @@ async function batchMovePlaylists(targetPath, targetName) {
   }
 }
 
+async function pausePlaylist(id) {
+  try {
+    await authFetch(API + '/api/playlist/' + id + '/pause', { method: 'POST' });
+    showToast('播放列表已暂停', 'info');
+    loadPlaylists();
+  } catch (e) {
+    showToast('暂停失败: ' + e.message, 'error');
+  }
+}
+
+async function resumePlaylist(id) {
+  try {
+    await authFetch(API + '/api/playlist/' + id + '/resume', { method: 'POST' });
+    showToast('播放列表已继续', 'success');
+    loadPlaylists();
+  } catch (e) {
+    showToast('继续失败: ' + e.message, 'error');
+  }
+}
+
 async function deletePlaylist(id) {
   if (!confirm('确定删除此播放列表及其所有子任务？')) return;
   try {
@@ -2805,7 +2834,7 @@ async function openPlaylistModal(playlistId) {
       '</div>'
     ].join('');
 
-    var statusLabels = {queued: '⏳ 排队中', downloading: '📥 下载中', done: '✅ 已完成', error: '❌ 失败', moving: '🔄 移动中', moved: '📦 已转存'};
+    var statusLabels = {queued: '⏳ 排队中', downloading: '📥 下载中', done: '✅ 已完成', error: '❌ 失败', moving: '🔄 移动中', moved: '📦 已转存', paused: '⏸ 已暂停'};
     var childHtml = children.map(function(c) {
       var thumb = c.thumbnail || '';
       var size = c.filesize ? formatBytes(c.filesize) : '';

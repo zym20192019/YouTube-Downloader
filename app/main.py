@@ -273,6 +273,24 @@ async def get_playlist_tasks(playlist_id: str):
     }
 
 
+@app.post("/api/playlist/{playlist_id}/pause")
+async def pause_playlist(playlist_id: str):
+    """Pause a downloading playlist."""
+    success = task_manager.pause_playlist(playlist_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot pause this playlist (not found or not downloading)")
+    return {"success": True, "message": "Playlist paused"}
+
+
+@app.post("/api/playlist/{playlist_id}/resume")
+async def resume_playlist(playlist_id: str):
+    """Resume a paused playlist."""
+    success = task_manager.resume_playlist(playlist_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Cannot resume this playlist (not found or not paused)")
+    return {"success": True, "message": "Playlist resumed"}
+
+
 @app.get("/api/tasks", response_model=TaskListResponse)
 async def list_tasks(
     q: Optional[str] = None,
