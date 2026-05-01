@@ -667,23 +667,34 @@
 
   // ========== YouTube SPA 路由监听 ==========
   let lastUrl = '';
+  let urlCheckTimer = null;
+
   function onUrlChange() {
-    if (location.href !== lastUrl) {
-      lastUrl = location.href;
-      setTimeout(() => {
-        injectPageButton();
-        updateVideoInfo();
-      }, 1000);
-    }
+    // 防抖：YouTube DOM 变化极频繁，300ms 内只触发一次
+    if (urlCheckTimer) return;
+    urlCheckTimer = setTimeout(() => {
+      urlCheckTimer = null;
+      if (location.href !== lastUrl) {
+        lastUrl = location.href;
+        if (location.pathname.includes('/watch')) {
+          setTimeout(() => {
+            injectPageButton();
+            updateVideoInfo();
+          }, 800);
+        }
+      }
+    }, 300);
   }
 
-  // 监听 URL 变化（YouTube SPA）
-  const observer = new MutationObserver(onUrlChange);
-  observer.observe(document.body, { childList: true, subtree: true });
-
-  // 也监听 popstate
-  window.addEventListener('popstate', onUrlChange);
+  // 主要依赖 YouTube 自带事件，MutationObserver 仅作备用
   window.addEventListener('yt-navigate-finish', onUrlChange);
+  window.addEventListener('popstate', onUrlChange);
+
+  // 轻量级 observer：只监听 title 变化（URL 改变必改 title），不监听整个 body
+  const titleEl = document.querySelector('title');
+  if (titleEl) {
+    new MutationObserver(onUrlChange).observe(titleEl, { childList: true });
+  }
 
   // ========== 菜单命令 ==========
   GM_registerMenuCommand('⚙️ 设置', openSettings);
