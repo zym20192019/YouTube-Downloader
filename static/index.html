@@ -2160,6 +2160,7 @@ function renderTasks(tasks) {
                         <div class="task-actions" style="margin-top: 8px;">
                             ${viewDetailsBtn}
                             ${moveButtons}
+                            ${status === 'error' ? `<button class="btn btn-sm" style="background:rgba(255,165,0,0.15);color:#ffa500;border:1px solid rgba(255,165,0,0.3);" onclick="retryTask('${taskId}')">🔄 重试</button>` : ''}
                             <button class="btn btn-sm btn-danger" onclick="deleteTask('${taskId}')">🗑 删除</button>
                         </div>
                     </div>
@@ -2196,6 +2197,18 @@ async function moveFile(taskId, targetPath, targetName) {
     }
   } catch (e) {
     showToast('移动失败: ' + e.message, 'error');
+  }
+}
+
+// Retry failed task
+async function retryTask(taskId) {
+  try {
+    const res = await authFetch(`${API}/api/tasks/${taskId}/retry`, { method: 'POST' });
+    const data = await res.json();
+    showToast('🔄 已重新排队', 'success');
+    loadTasks();
+  } catch (e) {
+    showToast('重试失败: ' + e.message, 'error');
   }
 }
 

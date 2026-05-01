@@ -555,6 +555,38 @@ async def delete_task(task_id: str):
     return {"success": True, "task_id": task_id}
 
 
+@app.post("/api/tasks/{task_id}/retry", response_model=TaskResponse)
+async def retry_task(task_id: str):
+    """Retry a failed task. Re-queues the download with same parameters."""
+    from app.downloader import download_video
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.get("status") not in ("error",):
+        raise HTTPException(status_code=400, detail="Can only retry failed tasks")
+
+    url = task["url"]
+    fmt = task.get("format", "video")
+    quality = task.get("quality")
+    hdr = task.get("hdr")
+
+    # Delete old task
+    if task.get("filepath") and os.path.exists(task["filepath"]):
+        try:
+            os.remove(task["filepath"])
+        except OSError:
+            pass
+    task_manager.delete_task(task_id)
+
+    # Create new task and queue it
+    from app.models import DownloadFormat
+    new_id = task_manager.create_task(url, DownloadFormat(fmt) if fmt else DownloadFormat.VIDEO, quality)
+    await download_queue.put((new_id, url, DownloadFormat(fmt) if fmt else DownloadFormat.VIDEO, quality, hdr))
+
+    new_task = task_manager.get_task(new_id)
+    return TaskResponse(**new_task)
+
+
 @app.post("/api/move", response_model=MoveResponse)
 async def move_file(req: MoveRequest):
     task = task_manager.get_task(req.task_id)
