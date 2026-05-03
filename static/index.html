@@ -931,26 +931,54 @@ header p {
 .path-delete-btn:hover { background: rgba(239, 68, 68, 0.2); }
 .path-item-actions {
   display: flex;
-  gap: 8px;
+  gap: 12px;
   align-items: center;
 }
-.path-auto-move-btn {
-  padding: 6px 12px;
-  border-radius: 8px;
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  background: rgba(99, 102, 241, 0.1);
-  color: var(--primary);
+.toggle-switch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   cursor: pointer;
-  font-size: 0.8rem;
+  user-select: none;
+}
+.toggle-switch input {
+  display: none;
+}
+.toggle-slider {
+  position: relative;
+  width: 40px;
+  height: 22px;
+  background: rgba(255,255,255,0.1);
+  border-radius: 11px;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(255,255,255,0.15);
+}
+.toggle-slider::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  background: rgba(255,255,255,0.5);
+  border-radius: 50%;
   transition: all 0.3s ease;
 }
-.path-auto-move-btn:hover {
-  background: rgba(99, 102, 241, 0.2);
-}
-.path-auto-move-btn.active {
-  background: rgba(99, 102, 241, 0.3);
+.toggle-switch input:checked + .toggle-slider {
+  background: var(--primary);
   border-color: var(--primary);
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
+}
+.toggle-switch input:checked + .toggle-slider::after {
+  transform: translateX(18px);
+  background: #fff;
+}
+.toggle-label {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.toggle-switch input:checked ~ .toggle-label {
+  color: var(--primary);
 }
 .path-add-form {
   display: flex;
@@ -2514,11 +2542,11 @@ function renderPathList() {
         <div class="path-item-path">${p.path}</div>
       </div>
       <div class="path-item-actions">
-        <button class="path-auto-move-btn ${p.auto_move ? 'active' : ''}" 
-                onclick="toggleAutoMove('${p.id}')" 
-                title="${p.auto_move ? '关闭自动转存' : '开启自动转存'}">
-          ${p.auto_move ? '⚡ 自动转存' : '⚡ 自动转存'}
-        </button>
+        <label class="toggle-switch" title="${p.auto_move ? '关闭自动转存' : '开启自动转存'}">
+          <input type="checkbox" ${p.auto_move ? 'checked' : ''} onchange="toggleAutoMove('${p.id}')">
+          <span class="toggle-slider"></span>
+          <span class="toggle-label">自动转存</span>
+        </label>
         <button class="path-delete-btn" onclick="deletePath('${p.id}')">删除</button>
       </div>
     </div>
