@@ -2520,10 +2520,11 @@ loadFiles();
 setInterval(loadTasks, 10000);
 
 // Path Manager Functions
-function togglePathModal() {
+async function togglePathModal() {
   const modal = document.getElementById('pathModal');
   modal.classList.toggle('hidden');
   if (!modal.classList.contains('hidden')) {
+    await loadMovePaths();
     renderPathList();
   }
 }
