@@ -929,6 +929,29 @@ header p {
   font-size: 0.8rem;
 }
 .path-delete-btn:hover { background: rgba(239, 68, 68, 0.2); }
+.path-item-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.path-auto-move-btn {
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  background: rgba(99, 102, 241, 0.1);
+  color: var(--primary);
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: all 0.3s ease;
+}
+.path-auto-move-btn:hover {
+  background: rgba(99, 102, 241, 0.2);
+}
+.path-auto-move-btn.active {
+  background: rgba(99, 102, 241, 0.3);
+  border-color: var(--primary);
+  box-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
+}
 .path-add-form {
   display: flex;
   flex-direction: column;
@@ -2490,7 +2513,14 @@ function renderPathList() {
         <div class="path-item-name">${p.name}</div>
         <div class="path-item-path">${p.path}</div>
       </div>
-      <button class="path-delete-btn" onclick="deletePath('${p.id}')">删除</button>
+      <div class="path-item-actions">
+        <button class="path-auto-move-btn ${p.auto_move ? 'active' : ''}" 
+                onclick="toggleAutoMove('${p.id}')" 
+                title="${p.auto_move ? '关闭自动转存' : '开启自动转存'}">
+          ${p.auto_move ? '⚡ 自动转存' : '⚡ 自动转存'}
+        </button>
+        <button class="path-delete-btn" onclick="deletePath('${p.id}')">删除</button>
+      </div>
     </div>
   `).join('');
 }
@@ -2547,6 +2577,24 @@ async function deletePath(pathId) {
     }
   } catch (e) {
     showToast('删除失败', 'error');
+  }
+}
+
+async function toggleAutoMove(pathId) {
+  try {
+    const res = await authFetch(`${API}/api/paths/${pathId}/auto-move`, { method: 'POST' });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.auto_move) {
+        showToast('已开启自动转存', 'success');
+      } else {
+        showToast('已关闭自动转存', 'info');
+      }
+      await loadMovePaths();
+      renderPathList();
+    }
+  } catch (e) {
+    showToast('操作失败', 'error');
   }
 }
 

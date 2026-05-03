@@ -152,6 +152,42 @@ async def delete_path(path_id: str):
     return {"success": True}
 
 
+@app.post("/api/paths/{path_id}/auto-move")
+async def toggle_auto_move(path_id: str):
+    """Toggle auto-move for a path. Only one path can have auto-move enabled."""
+    paths = load_path_config()
+    target_path = None
+    for p in paths:
+        if p["id"] == path_id:
+            target_path = p
+            break
+    if not target_path:
+        raise HTTPException(status_code=404, detail="Path not found")
+    
+    # Toggle auto_move for the target path
+    new_state = not target_path.get("auto_move", False)
+    
+    # Clear auto_move for all paths first (only one can be active)
+    for p in paths:
+        p["auto_move"] = False
+    
+    # Set the target path
+    target_path["auto_move"] = new_state
+    
+    save_path_config(paths)
+    return {"success": True, "auto_move": new_state, "path_id": path_id}
+
+
+@app.get("/api/paths/auto-move")
+async def get_auto_move_path():
+    """Get the current auto-move path configuration."""
+    paths = load_path_config()
+    for p in paths:
+        if p.get("auto_move", False):
+            return {"enabled": True, "path": p["path"], "name": p["name"], "path_id": p["id"]}
+    return {"enabled": False}
+
+
 # Mount static files
 app.mount("/static", StaticFiles(directory=str(Path(__file__).parent.parent / "static")), name="static")
 

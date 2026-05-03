@@ -1,14 +1,16 @@
 [
   {
     "id": "default",
-    "name": "\u4e0b\u8f7d\u76ee\u5f55",
+    "name": "下载目录",
     "path": "/root/youtube-downloader/downloads",
-    "icon": "\ud83d\udcc1"
+    "icon": "📁",
+    "auto_move": false
   },
   {
     "id": "path_1777262822943",
-    "name": "115\u7f51\u76d8",
+    "name": "115网盘",
     "path": "/Movies/CloudDrive/115/youtube",
-    "icon": "\ud83d\udcc1"
+    "icon": "📁",
+    "auto_move": false
   }
 ]
