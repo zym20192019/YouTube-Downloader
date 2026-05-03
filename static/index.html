@@ -2613,13 +2613,22 @@ async function toggleAutoMove(pathId) {
     const res = await authFetch(`${API}/api/paths/${pathId}/auto-move`, { method: 'POST' });
     if (res.ok) {
       const data = await res.json();
-      if (data.auto_move) {
-        showToast('已开启自动转存', 'success');
-      } else {
-        showToast('已关闭自动转存', 'info');
-      }
-      await loadMovePaths();
-      renderPathList();
+      // Update MOVE_PATHS in place
+      MOVE_PATHS.forEach(p => {
+        p.auto_move = (p.id === pathId) ? data.auto_move : false;
+      });
+      // Update all toggle switches visually without re-rendering
+      document.querySelectorAll('.path-item').forEach(item => {
+        const toggle = item.querySelector('.toggle-switch input');
+        if (toggle) {
+          const id = toggle.getAttribute('onchange')?.match(/'([^']+)'/)?.[1];
+          if (id) {
+            const pathData = MOVE_PATHS.find(p => p.id === id);
+            toggle.checked = pathData ? pathData.auto_move : false;
+          }
+        }
+      });
+      showToast(data.auto_move ? '已开启自动转存' : '已关闭自动转存', data.auto_move ? 'success' : 'info');
     }
   } catch (e) {
     showToast('操作失败', 'error');
