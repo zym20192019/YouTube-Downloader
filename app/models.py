@@ -22,6 +22,7 @@ class CloudPath(BaseModel):
     name: str = Field(..., description="Display name (e.g. '115网盘')")
     path: str = Field(..., description="Full path (e.g. '/Movies/CloudDrive/115/youtube')")
     icon: Optional[str] = Field(default="📁", description="Icon emoji")
+    auto_move: bool = Field(default=False, description="Auto-move downloaded files to this path")
 
 
 class MoveRequest(BaseModel):
