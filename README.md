@@ -26,6 +26,7 @@
 
 ### 文件管理
 - **云端转存**：一键移动到 115 网盘 / 百度网盘 或自定义路径（FUSE 安全模式：先复制 → 校验大小 → 删除源文件）
+- **自动转存**：开启后下载完成自动移动到指定路径，一次只能开启一个路径
 - **文件列表**：展示缩略图、时长、文件大小、下载时间
 - **自定义路径管理**：动态添加/删除转存目标，无需改代码
 
@@ -112,6 +113,21 @@ sudo systemctl start youtube-downloader
 
 ---
 
+## 🧩 油猴脚本（Tampermonkey）
+
+安装油猴脚本后，可在 YouTube 页面直接一键推送视频到下载器，无需手动复制链接。
+
+**安装地址：** [youtube-downloader.user.js](https://raw.githubusercontent.com/zym20192019/YouTube-Downloader/main/static/youtube-downloader.user.js)
+
+**功能：**
+- YouTube 视频页面显示下载按钮
+- 支持多服务器配置
+- 自动登录（保存密码）
+- 格式/质量选择
+- 可拖拽浮动面板
+
+---
+
 ## 📡 API 接口
 
 | 方法 | 路径 | 说明 |
@@ -130,6 +146,8 @@ sudo systemctl start youtube-downloader
 | `POST` | `/api/cookies` | 上传 Cookie 文件 |
 | `GET` | `/api/cookies/status` | Cookie 状态 |
 | `GET/POST/DELETE` | `/api/paths` | 自定义转存路径 CRUD |
+| `POST` | `/api/paths/{id}/auto-move` | 切换自动转存（仅一个路径可开启） |
+| `GET` | `/api/paths/auto-move` | 获取当前自动转存配置 |
 | `WS` | `/ws/{task_id}` | WebSocket 进度订阅 |
 
 ### WebSocket 消息格式
