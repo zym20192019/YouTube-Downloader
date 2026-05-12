@@ -783,10 +783,21 @@ async def _check_single_subscription(sub: dict) -> dict:
 
     existing_ids = _extract_existing_video_ids()
 
+    # Resolve channel URL to full Uploads playlist to avoid missing "Popular" videos
+    sub_url = sub["url"]
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+            _ci = ydl.extract_info(sub_url, download=False)
+            _cid = _ci.get("channel_id")
+            if _cid and _cid.startswith("UC"):
+                sub_url = f"https://www.youtube.com/playlist?list=UU{_cid[2:]}"
+    except Exception:
+        pass
+
     def _fetch_videos():
         try:
             with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
-                info = ydl.extract_info(sub["url"], download=False)
+                info = ydl.extract_info(sub_url, download=False)
                 if info.get("_type") == "playlist":
                     entries = info.get("entries", [])
                 elif info.get("entries"):
@@ -890,10 +901,21 @@ async def download_subscription_history(sub_id: str):
 
     existing_ids = _extract_existing_video_ids()
 
+    # Resolve channel URL to full Uploads playlist
+    sub_url = sub["url"]
+    try:
+        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+            _ci2 = ydl.extract_info(sub_url, download=False)
+            _cid2 = _ci2.get("channel_id")
+            if _cid2 and _cid2.startswith("UC"):
+                sub_url = f"https://www.youtube.com/playlist?list=UU{_cid2[2:]}"
+    except Exception:
+        pass
+
     def _fetch_all_videos():
         try:
             with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
-                info = ydl.extract_info(sub["url"], download=False)
+                info = ydl.extract_info(sub_url, download=False)
                 if info.get("_type") == "playlist":
                     entries = info.get("entries", [])
                 elif info.get("entries"):
