@@ -140,8 +140,9 @@ async def _upload_monitor():
 
 @app.on_event("startup")
 async def startup():
-    """Start the download worker and upload monitor on app startup."""
-    asyncio.create_task(download_worker())
+    """Start download workers and upload monitor on app startup."""
+    for _ in range(MAX_CONCURRENT_DOWNLOADS):
+        asyncio.create_task(download_worker())
     asyncio.create_task(_upload_monitor())
 
 
