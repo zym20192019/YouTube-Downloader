@@ -246,13 +246,36 @@ async def download_playlist(playlist_id: str, url: str, fmt: DownloadFormat, qua
     task_manager.update_task(playlist_id, status="downloading")
 
     loop = asyncio.get_event_loop()
+
+    # Normalize channel URLs to "Uploads" playlist to ensure full video coverage
+    # Channel URLs like /@name/videos often miss "Popular" videos or older content.
+    # The UU playlist contains everything.
+    def _resolve_channel_url(target_url):
+        try:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+                info = ydl.extract_info(target_url, download=False)
+                channel_id = info.get("channel_id")
+                if channel_id and channel_id.startswith("UC"):
+                    uploads_id = "UU" + channel_id[2:]
+                    return f"https://www.youtube.com/playlist?list={uploads_id}"
+        except Exception:
+            pass
+        return target_url
+
+    # Run resolution in thread to avoid blocking if yt-dlp hangs
+    resolved_url = await loop.run_in_executor(None, _resolve_channel_url, url)
+    if resolved_url != url:
+        task_manager.update_task(playlist_id, title="Channel Playlist Resolved")
+
     ydl_opts = _get_ydl_opts(playlist_id, fmt, quality, hdr)
     ydl_opts["noplaylist"] = False  # Enable playlist download
 
     def _extract_playlist():
         try:
             with yt_dlp.YoutubeDL({**ydl_opts, "quiet": True, "no_warnings": True}) as ydl:
-                info = ydl.extract_info(url, download=False)
+                # Use the resolved URL (UU playlist) if available
+                extract_url = resolved_url
+                info = ydl.extract_info(extract_url, download=False)
                 if info.get("_type") == "playlist":
                     return {
                         "title": info.get("title", "Unknown Playlist"),
