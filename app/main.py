@@ -799,7 +799,10 @@ async def _check_single_subscription(sub: dict) -> dict:
 
     def _fetch_videos():
         try:
-            ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True}
+            # Limit to first 30 videos to save CPU/Memory on low-end VPS (RackNerd)
+            # Check only recent videos to see if there's any update.
+            # Full history is available via "Download History" button.
+            ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "playlistend": 30}
             if COOKIE_FILE.exists():
                 ydl_opts["cookiefile"] = str(COOKIE_FILE)
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
