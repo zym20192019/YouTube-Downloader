@@ -92,6 +92,18 @@ _upload_lock = asyncio.Lock()
 SUBSCRIPTION_CHECK_INTERVAL = 3 * 60 * 60  # 3 hours
 
 
+def _drain_download_queue():
+    """Remove all pending items from the download queue."""
+    count = 0
+    while not download_queue.empty():
+        try:
+            download_queue.get_nowait()
+            count += 1
+        except asyncio.QueueEmpty:
+            break
+    return count
+
+
 async def download_worker():
     """Background worker that processes queued downloads with max concurrency.
     
@@ -100,6 +112,11 @@ async def download_worker():
     """
     while True:
         task_id, url, fmt, quality, hdr = await download_queue.get()
+        # Skip if task was deleted while queued
+        task = task_manager.get_task(task_id)
+        if not task:
+            download_queue.task_done()
+            continue
         auto_moved = False
         try:
             async with DOWNLOAD_SEMAPHORE:
@@ -583,6 +600,10 @@ async def batch_delete_playlists(req: BatchDeleteRequest):
         task_manager.delete_task(task_id)
         results["success"] += 1
         results["details"].append({"task_id": task_id, "status": "deleted"})
+    # Drain queue so playlist child tasks don't keep downloading
+    drained = _drain_download_queue()
+    if drained:
+        results["queue_drained"] = drained
     return results
 
 
@@ -753,9 +774,11 @@ async def batch_delete_tasks(req: BatchDeleteRequest):
         task_manager.delete_task(task_id)
         results["success"] += 1
         results["details"].append({"task_id": task_id, "status": "deleted"})
+    # Drain queue so deleted tasks don't keep downloading
+    drained = _drain_download_queue()
+    if drained:
+        results["queue_drained"] = drained
     return results
-
-
 
 
 # ── Subscriptions ──────────────────────────────────────────────────────────
