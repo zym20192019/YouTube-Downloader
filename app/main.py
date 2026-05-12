@@ -16,7 +16,7 @@ from app.models import (
 from app.tasks import task_manager
 from app.downloader import download_video, move_to_cloud_drive, DOWNLOAD_DIR, COOKIE_FILE
 from app.database import (
-    init_db, enqueue, dequeue, drain_queue, queue_size, restore_queue,
+    init_db, get_db, enqueue, dequeue, drain_queue, queue_size, restore_queue,
     delete_queue_item, list_subs, insert_sub, update_sub, delete_sub, get_sub,
     list_paths, insert_path, delete_path, get_path, update_path,
     get_auto_move_path, clear_auto_move_all, set_auto_move,
@@ -85,7 +85,11 @@ def _drain_download_queue():
 
 
 async def download_worker():
-    """Background worker that processes queued downloads with max concurrency."""
+    """Background worker that processes queued downloads with max concurrency.
+
+    Waits if total active tasks (downloading + CD2 uploading) >= limit.
+    Downloads queue; moves always proceed immediately.
+    """
     while True:
         task_id, url, fmt, quality, hdr = await download_queue.get()
         # Skip if task was deleted while queued
@@ -93,6 +97,15 @@ async def download_worker():
         if not task:
             download_queue.task_done()
             continue
+        # Wait if total concurrency (downloading + CD2 uploads) is at limit
+        while True:
+            conn = get_db()
+            dl = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='downloading'").fetchone()[0]
+            cd2 = count_cd2_temp_files()
+            total = dl + cd2
+            if total < MAX_CONCURRENT_DOWNLOADS:
+                break
+            await asyncio.sleep(CHECK_INTERVAL)
         try:
             async with DOWNLOAD_SEMAPHORE:
                 await download_video(task_id, url, fmt, quality, hdr)
@@ -966,7 +979,6 @@ async def download_subscription_history(sub_id: str):
 @app.get("/api/queue/status")
 async def queue_status():
     """Get current download queue status."""
-    from app.database import get_db
     conn = get_db()
     # Count actual task statuses from DB
     dl = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='downloading'").fetchone()[0]
