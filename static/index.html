@@ -3063,10 +3063,13 @@ async function updateQueueStatus() {
     if (!res) return;
     const data = await res.json();
     const el = document.getElementById('queueStatus');
+    const dl = data.downloading || 0;
+    const ul = data.active_uploads || 0;
+    const total = dl + ul;
     if (data.cd2_temp_files > 0) {
-      el.innerHTML = `队列: ${data.pending} | CD2上传: <span class="cd2-temp">${data.cd2_temp_files}</span> | 最大并发: ${data.max_concurrent}`;
+      el.innerHTML = `下载: ${dl} | 上传: <span class="cd2-temp">${ul}</span> | CD2: <span class="cd2-temp">${data.cd2_temp_files}</span> | 并发: ${total}/${data.max_concurrent}`;
     } else {
-      el.innerHTML = `队列: ${data.pending} | 最大并发: ${data.max_concurrent}`;
+      el.innerHTML = `下载: ${dl} | 上传: ${ul} | 并发: ${total}/${data.max_concurrent}`;
     }
   } catch (e) {
     // silent

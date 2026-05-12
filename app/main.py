@@ -84,27 +84,65 @@ CHECK_INTERVAL = _concurrency_cfg["check_interval"]
 DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 download_queue: asyncio.Queue = asyncio.Queue()
 
+# Track active CD2 uploads from manual moves (download_worker auto-waits itself)
+_active_uploads = 0
+_upload_lock = asyncio.Lock()
+
 # Auto-check subscriptions interval (in seconds)
 SUBSCRIPTION_CHECK_INTERVAL = 3 * 60 * 60  # 3 hours
 
 
 async def download_worker():
-    """Background worker that processes queued downloads with max concurrency."""
+    """Background worker that processes queued downloads with max concurrency.
+    
+    Holds the semaphore until CD2 upload completes (if auto-move is enabled),
+    so the total concurrent tasks (download + upload) respects MAX_CONCURRENT_DOWNLOADS.
+    """
     while True:
         task_id, url, fmt, quality, hdr = await download_queue.get()
+        auto_moved = False
         try:
             async with DOWNLOAD_SEMAPHORE:
                 await download_video(task_id, url, fmt, quality, hdr)
+                # Check if auto-move happened (download_video calls move_to_cloud_drive internally)
+                task = task_manager.get_task(task_id)
+                if task and task.get("status") == "moved":
+                    auto_moved = True
+                    # Wait for CD2 to finish uploading before releasing semaphore
+                    pre_count = count_cd2_temp_files()
+                    if pre_count > 0:
+                        waited = 0
+                        max_wait = 7200  # 2 hours safety timeout
+                        while waited < max_wait:
+                            await asyncio.sleep(CHECK_INTERVAL)
+                            waited += CHECK_INTERVAL
+                            cur = count_cd2_temp_files()
+                            if cur < pre_count:
+                                break  # CD2 finished at least one upload
         except Exception as e:
             task_manager.set_error(task_id, str(e))
         finally:
             download_queue.task_done()
 
 
+async def _upload_monitor():
+    """Background task that decrements _active_uploads when CD2 temp files disappear."""
+    global _active_uploads
+    last_count = count_cd2_temp_files()
+    while True:
+        await asyncio.sleep(CHECK_INTERVAL)
+        cur = count_cd2_temp_files()
+        if cur < last_count and _active_uploads > 0:
+            async with _upload_lock:
+                _active_uploads = max(0, _active_uploads - (last_count - cur))
+        last_count = cur
+
+
 @app.on_event("startup")
 async def startup():
-    """Start the download worker on app startup."""
+    """Start the download worker and upload monitor on app startup."""
     asyncio.create_task(download_worker())
+    asyncio.create_task(_upload_monitor())
 
 
 # Auth
@@ -642,15 +680,26 @@ async def retry_task(task_id: str):
 
 @app.post("/api/move", response_model=MoveResponse)
 async def move_file(req: MoveRequest):
+    global _active_uploads
     task = task_manager.get_task(req.task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     if not task.get("filepath"):
         raise HTTPException(status_code=400, detail="No file to move")
 
+    # Check total concurrency (downloading + uploading)
+    downloading = DOWNLOAD_SEMAPHORE._value  # available slots (lower = more downloading)
+    currently_downloading = MAX_CONCURRENT_DOWNLOADS - downloading
+    if currently_downloading + _active_uploads >= MAX_CONCURRENT_DOWNLOADS:
+        raise HTTPException(status_code=429, detail=f"并发已满（{MAX_CONCURRENT_DOWNLOADS}），请稍后再试")
+
     result = await move_to_cloud_drive(req.task_id, req.target_path, req.target_name)
     if not result:
         raise HTTPException(status_code=500, detail="Failed to move file")
+
+    # Track upload (CD2 will upload asynchronously)
+    async with _upload_lock:
+        _active_uploads += 1
 
     src, dest = result
     return MoveResponse(
@@ -1007,8 +1056,11 @@ async def download_subscription_history(sub_id: str):
 @app.get("/api/queue/status")
 async def queue_status():
     """Get current download queue status."""
+    downloading = MAX_CONCURRENT_DOWNLOADS - DOWNLOAD_SEMAPHORE._value
     return {
         "pending": download_queue.qsize(),
+        "downloading": downloading,
+        "active_uploads": _active_uploads,
         "max_concurrent": MAX_CONCURRENT_DOWNLOADS,
         "cd2_temp_files": count_cd2_temp_files(),
         "cd2_temp_dir": CD2_TEMP_DIR,
