@@ -97,6 +97,10 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
 
     def progress_hook(d: dict):
         if d["status"] == "downloading":
+            # Check if user cancelled this task
+            if task_manager.is_task_cancelled(task_id):
+                raise Exception("Task cancelled by user")
+            
             total = d.get("total_bytes") or d.get("total_bytes_estimate")
             downloaded = d.get("downloaded_bytes", 0) or 0
             try:

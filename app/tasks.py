@@ -18,8 +18,18 @@ class TaskManager:
     def __init__(self):
         self.tasks: Dict[str, dict] = {}
         self.subscribers: Dict[str, List[Callable]] = {}
+        self.cancelled_tasks: set = set()  # Track tasks pending cancellation
         self._lock = threading.Lock()
         self._load_history()
+
+    def cancel_task(self, task_id: str):
+        """Mark a task as cancelled to stop the background process."""
+        with self._lock:
+            self.cancelled_tasks.add(task_id)
+            self.subscribers.pop(task_id, None)
+
+    def is_task_cancelled(self, task_id: str) -> bool:
+        return task_id in self.cancelled_tasks
 
     def _load_history(self):
         """Load task history from JSON file on startup."""
@@ -137,10 +147,11 @@ class TaskManager:
         ))
 
     def delete_task(self, task_id: str) -> bool:
+        self.cancel_task(task_id)  # Signal the background process to stop
         with self._lock:
             if task_id in self.tasks:
                 del self.tasks[task_id]
-                self.subscribers.pop(task_id, None)
+                # Keep in cancelled_tasks until the background process finishes/exits
         self._save_history()
         with self._lock:
             return task_id not in self.tasks
