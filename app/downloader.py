@@ -256,7 +256,7 @@ async def download_playlist(playlist_id: str, url: str, fmt: DownloadFormat, qua
     # The UU playlist contains everything.
     def _resolve_channel_url(target_url):
         try:
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
                 info = ydl.extract_info(target_url, download=False)
                 channel_id = info.get("channel_id")
                 if channel_id and channel_id.startswith("UC"):

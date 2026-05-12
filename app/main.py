@@ -786,7 +786,7 @@ async def _check_single_subscription(sub: dict) -> dict:
     # Resolve channel URL to full Uploads playlist to avoid missing "Popular" videos
     sub_url = sub["url"]
     try:
-        ydl_opts_resolve = {"quiet": True, "no_warnings": True}
+        ydl_opts_resolve = {"quiet": True, "no_warnings": True, "extract_flat": True}
         if COOKIE_FILE.exists():
             ydl_opts_resolve["cookiefile"] = str(COOKIE_FILE)
         with yt_dlp.YoutubeDL(ydl_opts_resolve) as ydl:
@@ -913,7 +913,7 @@ async def download_subscription_history(sub_id: str):
     # Resolve channel URL to full Uploads playlist
     sub_url = sub["url"]
     try:
-        ydl_opts_resolve = {"quiet": True, "no_warnings": True}
+        ydl_opts_resolve = {"quiet": True, "no_warnings": True, "extract_flat": True}
         if COOKIE_FILE.exists():
             ydl_opts_resolve["cookiefile"] = str(COOKIE_FILE)
         with yt_dlp.YoutubeDL(ydl_opts_resolve) as ydl:
