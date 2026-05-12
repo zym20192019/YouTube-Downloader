@@ -984,13 +984,18 @@ async def download_subscription_history(sub_id: str):
 @app.get("/api/queue/status")
 async def queue_status():
     """Get current download queue status."""
-    downloading = MAX_CONCURRENT_DOWNLOADS - DOWNLOAD_SEMAPHORE._value
+    from app.database import get_db
+    conn = get_db()
+    # Count actual task statuses from DB
+    dl = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='downloading'").fetchone()[0]
+    mv = conn.execute("SELECT COUNT(*) FROM tasks WHERE status='moving'").fetchone()[0]
+    cd2 = count_cd2_temp_files()
     return {
         "pending": queue_size(),
-        "downloading": downloading,
-        "active_uploads": _active_uploads,
+        "downloading": dl,
+        "active_uploads": mv + _active_uploads,
         "max_concurrent": MAX_CONCURRENT_DOWNLOADS,
-        "cd2_temp_files": count_cd2_temp_files(),
+        "cd2_temp_files": cd2,
         "cd2_temp_dir": CD2_TEMP_DIR,
     }
 
