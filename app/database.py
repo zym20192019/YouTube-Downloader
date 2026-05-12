@@ -136,8 +136,10 @@ def migrate_from_json() -> None:
         try:
             with open(TASK_HISTORY_FILE, "r") as f:
                 tasks = json.load(f)
-            for task_id, task in tasks.items():
-                insert_task_from_dict(task)
+            if isinstance(tasks, dict):
+                for task_id, task in tasks.items():
+                    insert_task_from_dict(task)
+            # skip if it's a list (empty or not a dict)
             TASK_HISTORY_FILE.rename(TASK_HISTORY_FILE.with_suffix(".json.bak"))
         except (json.JSONDecodeError, IOError, OSError):
             pass
