@@ -188,7 +188,28 @@ body {
 /* Header */
 header {
   text-align: center;
-  margin-bottom: 40px;
+  padding: 40px 20px 20px;
+  position: relative;
+}
+.header-actions {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.queue-status {
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  background: var(--glass-bg);
+  padding: 6px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+}
+.queue-status .cd2-temp {
+  color: var(--warning);
+  font-weight: 600;
 }
 header h1 {
   font-size: 2.5rem;
@@ -906,6 +927,47 @@ header p {
   font-size: 18px;
 }
 .path-list { margin-bottom: 20px; }
+
+/* Concurrency Settings */
+.setting-group {
+  margin-bottom: 20px;
+}
+.setting-label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.setting-label span:first-child {
+  font-weight: 600;
+  color: var(--text);
+}
+.setting-hint {
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.setting-input {
+  width: 100%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+  background: rgba(0, 0, 0, 0.3);
+  color: var(--text);
+  font-size: 1rem;
+  outline: none;
+  transition: all 0.3s ease;
+}
+.setting-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+.setting-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 24px;
+}
+
 .path-item {
   display: flex;
   align-items: center;
@@ -1035,6 +1097,10 @@ header p {
   <header>
     <h1>YouTube Downloader</h1>
     <p>Liquid Glass Edition — 下载 · 管理 · 一键转存</p>
+    <div class="header-actions">
+      <button class="btn btn-sm btn-outline" onclick="openConcurrencySettings()" title="并发设置">⚙️ 并发设置</button>
+      <span id="queueStatus" class="queue-status"></span>
+    </div>
   </header>
 
   <!-- Download Section -->
@@ -2658,6 +2724,45 @@ async function toggleAutoMove(pathId) {
   </div>
 </div>
 
+<!-- Concurrency Settings Modal -->
+<div class="modal-overlay" id="concurrencyModal" onclick="closeConcurrencyModal()">
+  <div class="modal-content" style="max-width: 500px; padding: 28px;" onclick="event.stopPropagation();">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h3 style="margin: 0;">⚙️ 并发设置</h3>
+      <button class="modal-close" onclick="closeConcurrencyModal()">×</button>
+    </div>
+    
+    <div class="setting-group">
+      <label class="setting-label">
+        <span>最大同时任务数</span>
+        <span class="setting-hint">下载 + 上传总数</span>
+      </label>
+      <input type="number" id="maxConcurrent" min="1" max="10" value="3" class="setting-input" />
+    </div>
+    
+    <div class="setting-group">
+      <label class="setting-label">
+        <span>CloudDrive2 临时目录</span>
+        <span class="setting-hint">监控上传状态</span>
+      </label>
+      <input type="text" id="cd2TempDir" value="/opt/docker/cd2/temp" class="setting-input" />
+    </div>
+    
+    <div class="setting-group">
+      <label class="setting-label">
+        <span>检查间隔（秒）</span>
+        <span class="setting-hint">状态轮询频率</span>
+      </label>
+      <input type="number" id="checkInterval" min="1" max="60" value="5" class="setting-input" />
+    </div>
+    
+    <div class="setting-actions">
+      <button class="btn btn-outline" onclick="closeConcurrencyModal()">取消</button>
+      <button class="btn btn-primary" onclick="saveConcurrencyConfig()">保存</button>
+    </div>
+  </div>
+</div>
+
 <script>
 // Register Service Worker for PWA
 if ('serviceWorker' in navigator) {
@@ -2902,6 +3007,74 @@ async function movePlaylist(id, targetPath, targetName) {
     showToast('转存失败: ' + e.message, 'error');
   }
 }
+
+// ── Concurrency Settings ──────────────────────────────────────────────
+
+async function openConcurrencySettings() {
+  const modal = document.getElementById('concurrencyModal');
+  modal.classList.add('active');
+  await loadConcurrencyConfig();
+}
+
+function closeConcurrencyModal() {
+  document.getElementById('concurrencyModal').classList.remove('active');
+}
+
+async function loadConcurrencyConfig() {
+  try {
+    const res = await authFetch(`${API}/api/concurrency/config`);
+    if (!res) return;
+    const data = await res.json();
+    document.getElementById('maxConcurrent').value = data.max_concurrent_downloads;
+    document.getElementById('cd2TempDir').value = data.cd2_temp_dir;
+    document.getElementById('checkInterval').value = data.check_interval;
+  } catch (e) {
+    console.error('Failed to load concurrency config:', e);
+  }
+}
+
+async function saveConcurrencyConfig() {
+  const config = {
+    max_concurrent_downloads: parseInt(document.getElementById('maxConcurrent').value),
+    cd2_temp_dir: document.getElementById('cd2TempDir').value,
+    check_interval: parseInt(document.getElementById('checkInterval').value),
+  };
+  try {
+    const res = await authFetch(`${API}/api/concurrency/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(config),
+    });
+    if (!res) return;
+    const data = await res.json();
+    if (data.success) {
+      showToast('并发设置已保存', 'success');
+      closeConcurrencyModal();
+      updateQueueStatus();
+    }
+  } catch (e) {
+    showToast('保存失败: ' + e.message, 'error');
+  }
+}
+
+async function updateQueueStatus() {
+  try {
+    const res = await authFetch(`${API}/api/queue/status`);
+    if (!res) return;
+    const data = await res.json();
+    const el = document.getElementById('queueStatus');
+    if (data.cd2_temp_files > 0) {
+      el.innerHTML = `队列: ${data.pending} | CD2上传: <span class="cd2-temp">${data.cd2_temp_files}</span> | 最大并发: ${data.max_concurrent}`;
+    } else {
+      el.innerHTML = `队列: ${data.pending} | 最大并发: ${data.max_concurrent}`;
+    }
+  } catch (e) {
+    // silent
+  }
+}
+// Auto-refresh queue status
+setInterval(updateQueueStatus, 10000);
+updateQueueStatus();
 
 // Playlist detail modal
 async function openPlaylistModal(playlistId) {

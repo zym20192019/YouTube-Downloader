@@ -63,7 +63,24 @@ def save_path_config(paths: list[dict]) -> None:
 app = FastAPI(title="YouTube Downloader", description="Liquid Glass YouTube Video Downloader")
 
 # Download queue with concurrency control
-MAX_CONCURRENT_DOWNLOADS = 3
+CONFIG_FILE = Path(__file__).parent.parent / "config.json"
+
+def load_concurrency_config() -> dict:
+    """Load concurrency config from file, return defaults if not exists."""
+    defaults = {"max_concurrent_downloads": 3, "cd2_temp_dir": "/opt/docker/cd2/temp", "check_interval": 5}
+    if CONFIG_FILE.exists():
+        try:
+            with open(CONFIG_FILE, "r") as f:
+                cfg = json.load(f)
+                defaults.update(cfg)
+        except Exception:
+            pass
+    return defaults
+
+_concurrency_cfg = load_concurrency_config()
+MAX_CONCURRENT_DOWNLOADS = _concurrency_cfg["max_concurrent_downloads"]
+CD2_TEMP_DIR = _concurrency_cfg["cd2_temp_dir"]
+CHECK_INTERVAL = _concurrency_cfg["check_interval"]
 DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 download_queue: asyncio.Queue = asyncio.Queue()
 
@@ -993,7 +1010,63 @@ async def queue_status():
     return {
         "pending": download_queue.qsize(),
         "max_concurrent": MAX_CONCURRENT_DOWNLOADS,
+        "cd2_temp_files": count_cd2_temp_files(),
+        "cd2_temp_dir": CD2_TEMP_DIR,
     }
+
+
+@app.get("/api/concurrency/config")
+async def get_concurrency_config():
+    """Get current concurrency configuration."""
+    global MAX_CONCURRENT_DOWNLOADS, CD2_TEMP_DIR, CHECK_INTERVAL
+    cfg = load_concurrency_config()
+    return {
+        "max_concurrent_downloads": cfg["max_concurrent_downloads"],
+        "cd2_temp_dir": cfg["cd2_temp_dir"],
+        "check_interval": cfg["check_interval"],
+        "current_max": MAX_CONCURRENT_DOWNLOADS,
+        "cd2_temp_files": count_cd2_temp_files(),
+    }
+
+
+@app.post("/api/concurrency/config")
+async def update_concurrency_config(req: dict):
+    """Update concurrency configuration."""
+    global MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_SEMAPHORE, CD2_TEMP_DIR, CHECK_INTERVAL
+    
+    cfg = load_concurrency_config()
+    
+    if "max_concurrent_downloads" in req:
+        new_max = int(req["max_concurrent_downloads"])
+        if new_max < 1 or new_max > 10:
+            raise HTTPException(status_code=400, detail="max_concurrent_downloads must be between 1 and 10")
+        cfg["max_concurrent_downloads"] = new_max
+    
+    if "cd2_temp_dir" in req:
+        cfg["cd2_temp_dir"] = req["cd2_temp_dir"]
+    
+    if "check_interval" in req:
+        cfg["check_interval"] = int(req["check_interval"])
+    
+    with open(CONFIG_FILE, "w") as f:
+        json.dump(cfg, f, indent=2)
+    
+    MAX_CONCURRENT_DOWNLOADS = cfg["max_concurrent_downloads"]
+    CD2_TEMP_DIR = cfg["cd2_temp_dir"]
+    CHECK_INTERVAL = cfg["check_interval"]
+    DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
+    
+    return {"success": True, "config": cfg}
+
+
+def count_cd2_temp_files() -> int:
+    """Count files in CloudDrive2 temp directory."""
+    try:
+        if os.path.isdir(CD2_TEMP_DIR):
+            return len([f for f in os.listdir(CD2_TEMP_DIR) if os.path.isfile(os.path.join(CD2_TEMP_DIR, f))])
+    except Exception:
+        pass
+    return 0
 
 
 @app.get("/api/files", response_model=list[FileItem])

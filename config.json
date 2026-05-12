@@ -1,0 +1,5 @@
+{
+  "max_concurrent_downloads": 3,
+  "cd2_temp_dir": "/opt/docker/cd2/temp",
+  "check_interval": 5
+}
