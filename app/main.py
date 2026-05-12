@@ -93,23 +93,9 @@ async def download_worker():
         if not task:
             download_queue.task_done()
             continue
-        auto_moved = False
         try:
             async with DOWNLOAD_SEMAPHORE:
                 await download_video(task_id, url, fmt, quality, hdr)
-                task = task_manager.get_task(task_id)
-                if task and task.get("status") == "moved":
-                    auto_moved = True
-                    pre_count = count_cd2_temp_files()
-                    if pre_count > 0:
-                        waited = 0
-                        max_wait = 7200
-                        while waited < max_wait:
-                            await asyncio.sleep(CHECK_INTERVAL)
-                            waited += CHECK_INTERVAL
-                            cur = count_cd2_temp_files()
-                            if cur < pre_count:
-                                break
         except Exception as e:
             task_manager.set_error(task_id, str(e))
         finally:
@@ -667,11 +653,7 @@ async def move_file(req: MoveRequest):
     if not task.get("filepath"):
         raise HTTPException(status_code=400, detail="No file to move")
 
-    downloading = DOWNLOAD_SEMAPHORE._value
-    currently_downloading = MAX_CONCURRENT_DOWNLOADS - downloading
-    if currently_downloading + _active_uploads >= MAX_CONCURRENT_DOWNLOADS:
-        raise HTTPException(status_code=429, detail=f"并发已满（{MAX_CONCURRENT_DOWNLOADS}），请稍后再试")
-
+    # Moves always proceed — downloads queue, but moves never blocked
     result = await move_to_cloud_drive(req.task_id, req.target_path, req.target_name)
     if not result:
         raise HTTPException(status_code=500, detail="Failed to move file")
