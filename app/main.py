@@ -786,7 +786,10 @@ async def _check_single_subscription(sub: dict) -> dict:
     # Resolve channel URL to full Uploads playlist to avoid missing "Popular" videos
     sub_url = sub["url"]
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        ydl_opts_resolve = {"quiet": True, "no_warnings": True}
+        if COOKIE_FILE.exists():
+            ydl_opts_resolve["cookiefile"] = str(COOKIE_FILE)
+        with yt_dlp.YoutubeDL(ydl_opts_resolve) as ydl:
             _ci = ydl.extract_info(sub_url, download=False)
             _cid = _ci.get("channel_id")
             if _cid and _cid.startswith("UC"):
@@ -796,7 +799,10 @@ async def _check_single_subscription(sub: dict) -> dict:
 
     def _fetch_videos():
         try:
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+            ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True}
+            if COOKIE_FILE.exists():
+                ydl_opts["cookiefile"] = str(COOKIE_FILE)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(sub_url, download=False)
                 if info.get("_type") == "playlist":
                     entries = info.get("entries", [])
@@ -814,7 +820,7 @@ async def _check_single_subscription(sub: dict) -> dict:
                             "duration": e.get("duration"),
                             "thumbnail": e.get("thumbnail"),
                         }
-                        for e in entries[:100]
+                        for e in entries  # Removed [:100] limit to see all new videos
                         if e and e.get("id")
                     ],
                 }
@@ -904,7 +910,10 @@ async def download_subscription_history(sub_id: str):
     # Resolve channel URL to full Uploads playlist
     sub_url = sub["url"]
     try:
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        ydl_opts_resolve = {"quiet": True, "no_warnings": True}
+        if COOKIE_FILE.exists():
+            ydl_opts_resolve["cookiefile"] = str(COOKIE_FILE)
+        with yt_dlp.YoutubeDL(ydl_opts_resolve) as ydl:
             _ci2 = ydl.extract_info(sub_url, download=False)
             _cid2 = _ci2.get("channel_id")
             if _cid2 and _cid2.startswith("UC"):
@@ -914,7 +923,10 @@ async def download_subscription_history(sub_id: str):
 
     def _fetch_all_videos():
         try:
-            with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True, "extract_flat": True}) as ydl:
+            ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True}
+            if COOKIE_FILE.exists():
+                ydl_opts["cookiefile"] = str(COOKIE_FILE)
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(sub_url, download=False)
                 if info.get("_type") == "playlist":
                     entries = info.get("entries", [])
