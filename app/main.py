@@ -1,11 +1,10 @@
 import os
 import uuid
 import asyncio
-import json
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, Request, Depends
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile, File, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
@@ -16,6 +15,14 @@ from app.models import (
 )
 from app.tasks import task_manager
 from app.downloader import download_video, move_to_cloud_drive, DOWNLOAD_DIR, COOKIE_FILE
+from app.database import (
+    init_db, enqueue, dequeue, drain_queue, queue_size, restore_queue,
+    delete_queue_item, list_subs, insert_sub, update_sub, delete_sub, get_sub,
+    list_paths, insert_path, delete_path, get_path, update_path,
+    get_auto_move_path, clear_auto_move_all, set_auto_move,
+    get_config, set_config, get_all_config,
+    insert_token, get_token, delete_token, list_tokens,
+)
 
 
 class BatchMoveRequest(BaseModel):
@@ -40,60 +47,31 @@ class Subscription(BaseModel):
     last_video_count: int = 0
 
 
-PATH_CONFIG_FILE = Path(__file__).parent.parent / "path_config.json"
-
-
-def load_path_config() -> list[dict]:
-    """Load custom paths from config file, return defaults if not exists."""
-    if PATH_CONFIG_FILE.exists():
-        try:
-            with open(PATH_CONFIG_FILE, "r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return [{"id": "default", "name": "下载目录", "path": "/root/youtube-downloader/downloads", "icon": "📁"}]
-
-
-def save_path_config(paths: list[dict]) -> None:
-    """Save custom paths to config file."""
-    with open(PATH_CONFIG_FILE, "w") as f:
-        json.dump(paths, f, indent=2)
-
-
 app = FastAPI(title="YouTube Downloader", description="Liquid Glass YouTube Video Downloader")
 
-# Download queue with concurrency control
-CONFIG_FILE = Path(__file__).parent.parent / "config.json"
+# Initialize database on import
+init_db()
 
-def load_concurrency_config() -> dict:
-    """Load concurrency config from file, return defaults if not exists."""
-    defaults = {"max_concurrent_downloads": 3, "cd2_temp_dir": "/opt/docker/cd2/temp", "check_interval": 5}
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r") as f:
-                cfg = json.load(f)
-                defaults.update(cfg)
-        except Exception:
-            pass
-    return defaults
+# Load concurrency config from database
+_cfg = get_all_config()
+MAX_CONCURRENT_DOWNLOADS = _cfg.get("max_concurrent_downloads", 3)
+CD2_TEMP_DIR = _cfg.get("cd2_temp_dir", "/opt/docker/cd2/temp")
+CHECK_INTERVAL = _cfg.get("check_interval", 5)
 
-_concurrency_cfg = load_concurrency_config()
-MAX_CONCURRENT_DOWNLOADS = _concurrency_cfg["max_concurrent_downloads"]
-CD2_TEMP_DIR = _concurrency_cfg["cd2_temp_dir"]
-CHECK_INTERVAL = _concurrency_cfg["check_interval"]
 DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
 download_queue: asyncio.Queue = asyncio.Queue()
 
-# Track active CD2 uploads from manual moves (download_worker auto-waits itself)
+# Track active CD2 uploads from manual moves
 _active_uploads = 0
 _upload_lock = asyncio.Lock()
 
-# Auto-check subscriptions interval (in seconds)
+# Auto-check subscriptions interval
 SUBSCRIPTION_CHECK_INTERVAL = 3 * 60 * 60  # 3 hours
 
 
 def _drain_download_queue():
-    """Remove all pending items from the download queue."""
+    """Remove all pending items from the download queue (DB + memory)."""
+    # Drain memory queue
     count = 0
     while not download_queue.empty():
         try:
@@ -101,15 +79,13 @@ def _drain_download_queue():
             count += 1
         except asyncio.QueueEmpty:
             break
-    return count
+    # Drain DB queue
+    db_count = drain_queue()
+    return count + db_count
 
 
 async def download_worker():
-    """Background worker that processes queued downloads with max concurrency.
-    
-    Holds the semaphore until CD2 upload completes (if auto-move is enabled),
-    so the total concurrent tasks (download + upload) respects MAX_CONCURRENT_DOWNLOADS.
-    """
+    """Background worker that processes queued downloads with max concurrency."""
     while True:
         task_id, url, fmt, quality, hdr = await download_queue.get()
         # Skip if task was deleted while queued
@@ -121,21 +97,19 @@ async def download_worker():
         try:
             async with DOWNLOAD_SEMAPHORE:
                 await download_video(task_id, url, fmt, quality, hdr)
-                # Check if auto-move happened (download_video calls move_to_cloud_drive internally)
                 task = task_manager.get_task(task_id)
                 if task and task.get("status") == "moved":
                     auto_moved = True
-                    # Wait for CD2 to finish uploading before releasing semaphore
                     pre_count = count_cd2_temp_files()
                     if pre_count > 0:
                         waited = 0
-                        max_wait = 7200  # 2 hours safety timeout
+                        max_wait = 7200
                         while waited < max_wait:
                             await asyncio.sleep(CHECK_INTERVAL)
                             waited += CHECK_INTERVAL
                             cur = count_cd2_temp_files()
                             if cur < pre_count:
-                                break  # CD2 finished at least one upload
+                                break
         except Exception as e:
             task_manager.set_error(task_id, str(e))
         finally:
@@ -157,7 +131,13 @@ async def _upload_monitor():
 
 @app.on_event("startup")
 async def startup():
-    """Start download workers and upload monitor on app startup."""
+    """Start download workers and restore queue from database."""
+    # Restore queue from database
+    restored = restore_queue(download_queue)
+    if restored > 0:
+        print(f"Restored {restored} queued downloads from database")
+
+    # Start download workers
     for _ in range(MAX_CONCURRENT_DOWNLOADS):
         asyncio.create_task(download_worker())
     asyncio.create_task(_upload_monitor())
@@ -166,31 +146,34 @@ async def startup():
 # Auth
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Zym@qwe123"
-ACTIVE_TOKENS: dict[str, str] = {}  # token -> username
 
 AUTH_WHITELIST = {"/", "/api/login", "/api/health", "/api/queue/status", "/favicon.ico"}
 
-def get_token(request: Request) -> str:
+
+def validate_token(request: Request) -> str:
     """Extract and validate bearer token."""
+    from app.database import get_token as db_get_token
     auth = request.headers.get("Authorization", "")
     if not auth.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Unauthorized")
     token = auth[7:]
-    if token not in ACTIVE_TOKENS:
+    username = db_get_token(token)
+    if not username:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
     return token
+
 
 async def auth_middleware(request: Request, call_next):
     """Skip auth for whitelisted paths, WebSocket, and static files."""
     path = request.url.path
     if path in AUTH_WHITELIST or path.startswith("/static") or path.startswith("/ws"):
         return await call_next(request)
-    # Validate token
     try:
-        get_token(request)
+        validate_token(request)
     except HTTPException as e:
         return JSONResponse(status_code=e.status_code, content={"detail": e.detail})
     return await call_next(request)
+
 
 app.middleware("http")(auth_middleware)
 
@@ -198,66 +181,59 @@ app.middleware("http")(auth_middleware)
 @app.get("/api/paths", response_model=list[CloudPath])
 async def get_paths():
     """Get configured custom paths."""
-    return load_path_config()
+    paths = list_paths()
+    # Add default if no paths exist
+    if not paths:
+        return [{"id": "default", "name": "下载目录", "path": "/root/youtube-downloader/downloads", "icon": "📁", "auto_move": False}]
+    return paths
 
 
 @app.post("/api/paths", response_model=CloudPath)
 async def add_path(req: CloudPath):
     """Add a new custom path."""
-    paths = load_path_config()
-    # Check if path already exists
+    paths = list_paths()
     for p in paths:
         if p["path"] == req.path:
             raise HTTPException(status_code=400, detail="Path already exists")
-    paths.append(req.model_dump())
-    save_path_config(paths)
+    insert_path(req.id, req.name, req.path, req.icon or "📁", req.auto_move)
     return req
 
 
 @app.delete("/api/paths/{path_id}")
-async def delete_path(path_id: str):
+async def delete_path_endpoint(path_id: str):
     """Delete a custom path by ID."""
-    paths = load_path_config()
-    new_paths = [p for p in paths if p["id"] != path_id]
-    if len(new_paths) == len(paths):
+    p = get_path(path_id)
+    if not p:
         raise HTTPException(status_code=404, detail="Path not found")
-    save_path_config(new_paths)
+    delete_path(path_id)
     return {"success": True}
 
 
 @app.post("/api/paths/{path_id}/auto-move")
 async def toggle_auto_move(path_id: str):
     """Toggle auto-move for a path. Only one path can have auto-move enabled."""
-    paths = load_path_config()
-    target_path = None
-    for p in paths:
-        if p["id"] == path_id:
-            target_path = p
-            break
+    target_path = get_path(path_id)
     if not target_path:
         raise HTTPException(status_code=404, detail="Path not found")
-    
-    # Toggle auto_move for the target path
+
     new_state = not target_path.get("auto_move", False)
-    
-    # Clear auto_move for all paths first (only one can be active)
-    for p in paths:
-        p["auto_move"] = False
-    
-    # Set the target path
-    target_path["auto_move"] = new_state
-    
-    save_path_config(paths)
+
+    # Clear auto_move for all paths first
+    clear_auto_move_all()
+
+    # Set the target path if enabling
+    if new_state:
+        set_auto_move(path_id, True)
+
     return {"success": True, "auto_move": new_state, "path_id": path_id}
 
 
 @app.get("/api/paths/auto-move")
-async def get_auto_move_path():
+async def get_auto_move_path_endpoint():
     """Get the current auto-move path configuration."""
-    paths = load_path_config()
-    for p in paths:
-        if p.get("auto_move", False):
-            return {"enabled": True, "path": p["path"], "name": p["name"], "path_id": p["id"]}
+    p = get_auto_move_path()
+    if p:
+        return {"enabled": True, "path": p["path"], "name": p["name"], "path_id": p["id"]}
     return {"enabled": False}
 
 
@@ -283,7 +259,7 @@ async def login(request: Request):
 
     if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
         token = str(uuid.uuid4())
-        ACTIVE_TOKENS[token] = username
+        insert_token(token, username)
         return {"success": True, "token": token, "username": username}
 
     raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -295,7 +271,7 @@ async def logout(request: Request):
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
         token = auth[7:]
-        ACTIVE_TOKENS.pop(token, None)
+        delete_token(token)
     return {"success": True}
 
 
@@ -308,7 +284,8 @@ async def index():
 async def create_download(req: DownloadRequest):
     task_id = task_manager.create_task(req.url, req.format, req.quality)
 
-    # Add to download queue (processed by worker with max 3 concurrency)
+    # Add to database queue and memory queue
+    enqueue(task_id, req.url, req.format.value, req.quality, req.hdr)
     await download_queue.put((task_id, req.url, req.format, req.quality, req.hdr))
 
     task = task_manager.get_task(task_id)
@@ -317,12 +294,11 @@ async def create_download(req: DownloadRequest):
 
 @app.post("/api/playlist/download", response_model=TaskResponse)
 async def create_playlist_download(req: DownloadRequest):
-    """Start downloading a playlist. Creates a parent task with child tasks for each video."""
+    """Start downloading a playlist."""
     from app.downloader import download_playlist
 
     task_id = task_manager.create_playlist_task(req.url, req.format, req.quality)
 
-    # Playlists bypass queue - they handle their own sequential downloads
     asyncio.create_task(
         download_playlist(task_id, req.url, req.format, req.quality, req.hdr)
     )
@@ -354,7 +330,7 @@ async def get_playlist_info(url: str):
                                 "url": e.get("url") or e.get("webpage_url") or f"https://www.youtube.com/watch?v={e.get('id')}",
                                 "duration": e.get("duration"),
                             }
-                            for e in entries[:50]  # Limit to first 50 for preview
+                            for e in entries[:50]
                         ]
                     }
                 return None
@@ -368,13 +344,13 @@ async def get_playlist_info(url: str):
 
 @app.get("/api/playlist/{playlist_id}/tasks")
 async def get_playlist_tasks(playlist_id: str):
-    """Get all child tasks for a playlist, including their individual download status."""
+    """Get all child tasks for a playlist."""
     parent_task = task_manager.get_task(playlist_id)
     if not parent_task:
         raise HTTPException(status_code=404, detail="Playlist task not found")
-    
+
     child_tasks = task_manager.get_child_tasks(playlist_id)
-    
+
     return {
         "playlist": parent_task,
         "children": child_tasks,
@@ -387,14 +363,14 @@ async def pause_playlist(playlist_id: str):
     """Pause a downloading playlist."""
     success = task_manager.pause_playlist(playlist_id)
     if not success:
-        raise HTTPException(status_code=400, detail="Cannot pause this playlist (not found or not downloading)")
+        raise HTTPException(status_code=400, detail="Cannot pause this playlist")
     return {"success": True, "message": "Playlist paused"}
 
 
 @app.post("/api/playlist/{playlist_id}/resume")
 async def resume_playlist(playlist_id: str):
-    """Resume a paused playlist. Re-starts download coroutine if needed."""
-    from app.downloader import download_playlist, resume_playlist_download
+    """Resume a paused playlist."""
+    from app.downloader import resume_playlist_download
 
     task = task_manager.get_task(playlist_id)
     if not task or not task.get("is_playlist"):
@@ -402,15 +378,11 @@ async def resume_playlist(playlist_id: str):
     if task.get("status") != "paused":
         raise HTTPException(status_code=400, detail="Playlist is not paused")
 
-    # Check if download coroutine is still alive by seeing if there are unfinished child tasks
-    # that haven't been created yet (meaning the loop hasn't reached them)
     playlist_info = task.get("playlist_info", {})
     entries = playlist_info.get("entries", [])
     child_tasks = task_manager.get_child_tasks(playlist_id)
     created_ids = {c["task_id"] for c in child_tasks}
 
-    # Determine which video index to resume from
-    # Resume from the first video that hasn't been created as a child task yet
     resume_from = 0
     for i, entry in enumerate(entries):
         child_id = f"{playlist_id}_{i}"
@@ -418,14 +390,11 @@ async def resume_playlist(playlist_id: str):
             resume_from = i
             break
     else:
-        # All child tasks created — resume from where progress left off
         pl_prog = task.get("playlist_progress", {})
         resume_from = pl_prog.get("current", 0)
 
-    # Set status to downloading first
     task_manager.resume_playlist(playlist_id)
 
-    # Re-start the download coroutine from where we left off
     fmt = task.get("format", "best")
     quality = task.get("quality")
     url = task.get("url", "")
@@ -437,19 +406,16 @@ async def resume_playlist(playlist_id: str):
 
 
 @app.get("/api/tasks", response_model=TaskListResponse)
-async def list_tasks(
+async def list_tasks_endpoint(
     q: Optional[str] = None,
     status: Optional[str] = None,
 ):
     """List individual download tasks (excludes playlists and child tasks)."""
     tasks = task_manager.list_tasks()
-    # Exclude playlist parent tasks and child tasks (which have a parent_id)
     tasks = [t for t in tasks if not t.get("is_playlist") and not t.get("parent_id")]
-    # Filter by search query (title or URL)
     if q:
         q_lower = q.lower()
         tasks = [t for t in tasks if q_lower in (t.get("title") or "").lower() or q_lower in (t.get("url") or "").lower()]
-    # Filter by status
     if status:
         tasks = [t for t in tasks if t.get("status") == status]
     return TaskListResponse(
@@ -482,7 +448,6 @@ async def list_playlists(
 ):
     """List playlist parent tasks with progress summary."""
     tasks = task_manager.list_tasks()
-    # Only playlist parent tasks
     playlists = [t for t in tasks if t.get("is_playlist")]
     if q:
         q_lower = q.lower()
@@ -493,7 +458,6 @@ async def list_playlists(
     result = []
     for pl in playlists:
         children = task_manager.get_child_tasks(pl["task_id"])
-        # 使用 playlist_progress 中记录的总数，避免边下边创建导致总数动态变化 (1/2, 2/3...)
         pl_prog = pl.get("playlist_progress", {})
         total = pl_prog.get("total") or len(children)
         completed = pl_prog.get("current", 0)
@@ -585,7 +549,6 @@ async def batch_delete_playlists(req: BatchDeleteRequest):
             results["failed"] += 1
             results["details"].append({"task_id": task_id, "status": "skipped", "reason": "Not a playlist"})
             continue
-        # Delete child files and tasks
         children = task_manager.get_child_tasks(task_id)
         for child in children:
             if child.get("filepath") and os.path.exists(child["filepath"]):
@@ -595,12 +558,10 @@ async def batch_delete_playlists(req: BatchDeleteRequest):
                     pass
             task_manager.subscribers.pop(child["task_id"], None)
             task_manager.delete_task(child["task_id"])
-        # Delete parent
         task_manager.subscribers.pop(task_id, None)
         task_manager.delete_task(task_id)
         results["success"] += 1
         results["details"].append({"task_id": task_id, "status": "deleted"})
-    # Drain queue so playlist child tasks don't keep downloading
     drained = _drain_download_queue()
     if drained:
         results["queue_drained"] = drained
@@ -611,8 +572,7 @@ async def batch_delete_playlists(req: BatchDeleteRequest):
 async def batch_move_subscriptions(req: BatchMoveRequest):
     """Move downloaded files from selected subscription tasks."""
     results = {"success": 0, "failed": 0, "details": []}
-    # Find tasks associated with subscription URLs
-    subs = load_subscriptions()
+    subs = list_subs()
     sub_urls = {s["id"]: s["url"] for s in subs if s["id"] in req.task_ids}
     for task in task_manager.list_tasks():
         if task.get("url") in sub_urls.values() and task.get("filepath") and task.get("status") in (TaskStatus.DONE, TaskStatus.MOVED):
@@ -630,21 +590,20 @@ async def batch_move_subscriptions(req: BatchMoveRequest):
 async def batch_delete_subscriptions(req: BatchDeleteRequest):
     """Delete subscription entries and their associated tasks."""
     results = {"success": 0, "failed": 0, "details": []}
-    subs = load_subscriptions()
     for sub_id in req.task_ids:
-        new_subs = [s for s in subs if s["id"] != sub_id]
-        if len(new_subs) == len(subs):
+        sub = get_sub(sub_id)
+        if not sub:
             results["failed"] += 1
             results["details"].append({"task_id": sub_id, "status": "skipped", "reason": "Subscription not found"})
             continue
-        save_subscriptions(new_subs)
+        delete_sub(sub_id)
         results["success"] += 1
         results["details"].append({"task_id": sub_id, "status": "deleted"})
     return results
 
 
 @app.get("/api/tasks/{task_id}", response_model=TaskResponse)
-async def get_task(task_id: str):
+async def get_task_endpoint(task_id: str):
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -652,12 +611,11 @@ async def get_task(task_id: str):
 
 
 @app.delete("/api/tasks/{task_id}")
-async def delete_task(task_id: str):
+async def delete_task_endpoint(task_id: str):
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    # Delete file if exists
     if task.get("filepath") and os.path.exists(task["filepath"]):
         try:
             os.remove(task["filepath"])
@@ -670,7 +628,7 @@ async def delete_task(task_id: str):
 
 @app.post("/api/tasks/{task_id}/retry", response_model=TaskResponse)
 async def retry_task(task_id: str):
-    """Retry a failed task. Re-queues the download with same parameters."""
+    """Retry a failed task."""
     from app.downloader import download_video
     task = task_manager.get_task(task_id)
     if not task:
@@ -683,7 +641,6 @@ async def retry_task(task_id: str):
     quality = task.get("quality")
     hdr = task.get("hdr")
 
-    # Delete old task
     if task.get("filepath") and os.path.exists(task["filepath"]):
         try:
             os.remove(task["filepath"])
@@ -691,10 +648,11 @@ async def retry_task(task_id: str):
             pass
     task_manager.delete_task(task_id)
 
-    # Create new task and queue it
     from app.models import DownloadFormat
-    new_id = task_manager.create_task(url, DownloadFormat(fmt) if fmt else DownloadFormat.VIDEO, quality)
-    await download_queue.put((new_id, url, DownloadFormat(fmt) if fmt else DownloadFormat.VIDEO, quality, hdr))
+    fmt_enum = DownloadFormat(fmt) if fmt else DownloadFormat.VIDEO
+    new_id = task_manager.create_task(url, fmt_enum, quality)
+    enqueue(new_id, url, fmt_enum.value, quality, hdr)
+    await download_queue.put((new_id, url, fmt_enum, quality, hdr))
 
     new_task = task_manager.get_task(new_id)
     return TaskResponse(**new_task)
@@ -709,8 +667,7 @@ async def move_file(req: MoveRequest):
     if not task.get("filepath"):
         raise HTTPException(status_code=400, detail="No file to move")
 
-    # Check total concurrency (downloading + uploading)
-    downloading = DOWNLOAD_SEMAPHORE._value  # available slots (lower = more downloading)
+    downloading = DOWNLOAD_SEMAPHORE._value
     currently_downloading = MAX_CONCURRENT_DOWNLOADS - downloading
     if currently_downloading + _active_uploads >= MAX_CONCURRENT_DOWNLOADS:
         raise HTTPException(status_code=429, detail=f"并发已满（{MAX_CONCURRENT_DOWNLOADS}），请稍后再试")
@@ -719,7 +676,6 @@ async def move_file(req: MoveRequest):
     if not result:
         raise HTTPException(status_code=500, detail="Failed to move file")
 
-    # Track upload (CD2 will upload asynchronously)
     async with _upload_lock:
         _active_uploads += 1
 
@@ -763,18 +719,15 @@ async def batch_delete_tasks(req: BatchDeleteRequest):
             results["failed"] += 1
             results["details"].append({"task_id": task_id, "status": "skipped", "reason": "Task not found"})
             continue
-        # Delete file if exists
         if task.get("filepath") and os.path.exists(task["filepath"]):
             try:
                 os.remove(task["filepath"])
             except OSError:
                 pass
-        # Close WS connection if exists
         task_manager.subscribers.pop(task_id, None)
         task_manager.delete_task(task_id)
         results["success"] += 1
         results["details"].append({"task_id": task_id, "status": "deleted"})
-    # Drain queue so deleted tasks don't keep downloading
     drained = _drain_download_queue()
     if drained:
         results["queue_drained"] = drained
@@ -782,28 +735,12 @@ async def batch_delete_tasks(req: BatchDeleteRequest):
 
 
 # ── Subscriptions ──────────────────────────────────────────────────────────
-SUBSCRIPTIONS_FILE = Path(__file__).parent.parent / "subscriptions.json"
-
-
-def load_subscriptions() -> list[dict]:
-    if SUBSCRIPTIONS_FILE.exists():
-        try:
-            with open(SUBSCRIPTIONS_FILE, "r") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError):
-            pass
-    return []
-
-
-def save_subscriptions(subs: list[dict]) -> None:
-    with open(SUBSCRIPTIONS_FILE, "w") as f:
-        json.dump(subs, f, indent=2)
 
 
 def _extract_existing_video_ids() -> set[str]:
     """Get all YouTube video IDs already downloaded."""
     ids = set()
-    for task in task_manager.tasks.values():
+    for task in task_manager.list_tasks():
         url = task.get("url", "")
         if "watch?v=" in url:
             ids.add(url.split("watch?v=")[1].split("&")[0])
@@ -813,58 +750,38 @@ def _extract_existing_video_ids() -> set[str]:
 
 
 @app.get("/api/subscriptions")
-async def list_subscriptions():
-    return load_subscriptions()
+async def list_subscriptions_endpoint():
+    return list_subs()
 
 
 @app.post("/api/subscriptions")
 async def add_subscription(req: Subscription):
-    subs = load_subscriptions()
+    subs = list_subs()
     for s in subs:
         if s["url"] == req.url:
             raise HTTPException(status_code=400, detail="Subscription already exists")
     now = datetime.now().isoformat()
-    new_sub = {
-        "id": str(uuid.uuid4())[:8],
-        "url": req.url,
-        "name": req.name or "",
-        "auto_download": req.auto_download,
-        "format": req.format or "best",
-        "quality": req.quality,
-        "created_at": now,
-        "last_checked": "",
-        "last_video_count": 0,
-    }
-    subs.append(new_sub)
-    save_subscriptions(subs)
-    return new_sub
+    sub_id = str(uuid.uuid4())[:8]
+    insert_sub(sub_id, req.url, req.name or "", req.auto_download, req.format or "best", req.quality)
+    return {"id": sub_id, "url": req.url, "name": req.name or "", "auto_download": req.auto_download, "format": req.format or "best", "quality": req.quality, "created_at": now, "last_checked": "", "last_video_count": 0}
 
 
 @app.delete("/api/subscriptions/{sub_id}")
-async def delete_subscription(sub_id: str):
-    subs = load_subscriptions()
-    new_subs = [s for s in subs if s["id"] != sub_id]
-    if len(new_subs) == len(subs):
+async def delete_subscription_endpoint(sub_id: str):
+    sub = get_sub(sub_id)
+    if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
-    save_subscriptions(new_subs)
+    delete_sub(sub_id)
     return {"success": True}
 
 
 @app.post("/api/subscriptions/{sub_id}/update")
-async def update_subscription(sub_id: str, req: Subscription):
-    subs = load_subscriptions()
-    for i, s in enumerate(subs):
-        if s["id"] == sub_id:
-            subs[i].update({
-                "name": req.name,
-                "url": req.url,
-                "auto_download": req.auto_download,
-                "format": req.format,
-                "quality": req.quality,
-            })
-            save_subscriptions(subs)
-            return subs[i]
-    raise HTTPException(status_code=404, detail="Subscription not found")
+async def update_subscription_endpoint(sub_id: str, req: Subscription):
+    sub = get_sub(sub_id)
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+    update_sub(sub_id, name=req.name, url=req.url, auto_download=req.auto_download, format=req.format, quality=req.quality)
+    return {"id": sub_id, "url": req.url, "name": req.name, "auto_download": req.auto_download, "format": req.format, "quality": req.quality}
 
 
 async def _check_single_subscription(sub: dict) -> dict:
@@ -873,7 +790,6 @@ async def _check_single_subscription(sub: dict) -> dict:
 
     existing_ids = _extract_existing_video_ids()
 
-    # Resolve channel URL to full Uploads playlist to avoid missing "Popular" videos
     sub_url = sub["url"]
     try:
         ydl_opts_resolve = {"quiet": True, "no_warnings": True, "extract_flat": True}
@@ -889,9 +805,6 @@ async def _check_single_subscription(sub: dict) -> dict:
 
     def _fetch_videos():
         try:
-            # Limit to first 30 videos to save CPU/Memory on low-end VPS (RackNerd)
-            # Check only recent videos to see if there's any update.
-            # Full history is available via "Download History" button.
             ydl_opts = {"quiet": True, "no_warnings": True, "extract_flat": True, "playlistend": 30}
             if COOKIE_FILE.exists():
                 ydl_opts["cookiefile"] = str(COOKIE_FILE)
@@ -913,7 +826,7 @@ async def _check_single_subscription(sub: dict) -> dict:
                             "duration": e.get("duration"),
                             "thumbnail": e.get("thumbnail"),
                         }
-                        for e in entries  # Removed [:100] limit to see all new videos
+                        for e in entries
                         if e and e.get("id")
                     ],
                 }
@@ -936,7 +849,7 @@ async def _check_single_subscription(sub: dict) -> dict:
             quality = sub.get("quality")
             task_id = task_manager.create_task(video["url"], DownloadFormat(fmt), quality)
             task_manager.set_metadata(task_id, title=video["title"], thumbnail=video.get("thumbnail"), duration=video.get("duration"))
-            # Add to queue instead of direct execution
+            enqueue(task_id, video["url"], fmt, quality, None)
             await download_queue.put((task_id, video["url"], DownloadFormat(fmt), quality, None))
             downloaded.append(video["title"])
             queued_count += 1
@@ -953,23 +866,20 @@ async def _check_single_subscription(sub: dict) -> dict:
 
 @app.post("/api/subscriptions/{sub_id}/check")
 async def check_subscription(sub_id: str):
-    subs = load_subscriptions()
-    sub = next((s for s in subs if s["id"] == sub_id), None)
+    sub = get_sub(sub_id)
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     result = await _check_single_subscription(sub)
 
-    sub["last_checked"] = datetime.now().isoformat()
-    sub["last_video_count"] = result.get("new_videos", 0)
-    save_subscriptions(subs)
+    update_sub(sub_id, last_checked=datetime.now().isoformat(), last_video_count=result.get("new_videos", 0))
 
     return result
 
 
 @app.post("/api/subscriptions/check-all")
 async def check_all_subscriptions():
-    subs = load_subscriptions()
+    subs = list_subs()
     results = []
     for sub in subs:
         try:
@@ -980,27 +890,23 @@ async def check_all_subscriptions():
                 "new_videos": result.get("new_videos", 0),
                 "downloaded": result.get("downloaded", []),
             })
-            sub["last_checked"] = datetime.now().isoformat()
-            sub["last_video_count"] = result.get("new_videos", 0)
+            update_sub(sub["id"], last_checked=datetime.now().isoformat(), last_video_count=result.get("new_videos", 0))
         except Exception as e:
             results.append({"id": sub["id"], "name": sub.get("name", sub["url"]), "error": str(e)})
-    save_subscriptions(subs)
     return {"total": len(subs), "results": results}
 
 
 @app.post("/api/subscriptions/{sub_id}/download-history")
 async def download_subscription_history(sub_id: str):
-    """Download ALL videos from a subscription (historical + new). Queued with max 3 concurrency."""
+    """Download ALL videos from a subscription."""
     import yt_dlp
 
-    subs = load_subscriptions()
-    sub = next((s for s in subs if s["id"] == sub_id), None)
+    sub = get_sub(sub_id)
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     existing_ids = _extract_existing_video_ids()
 
-    # Resolve channel URL to full Uploads playlist
     sub_url = sub["url"]
     try:
         ydl_opts_resolve = {"quiet": True, "no_warnings": True, "extract_flat": True}
@@ -1050,7 +956,6 @@ async def download_subscription_history(sub_id: str):
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
 
-    # Queue ALL videos that haven't been downloaded
     new_videos = [v for v in result["entries"] if v["id"] not in existing_ids]
     queued_count = 0
 
@@ -1060,12 +965,11 @@ async def download_subscription_history(sub_id: str):
     for video in new_videos:
         task_id = task_manager.create_task(video["url"], DownloadFormat(fmt), quality)
         task_manager.set_metadata(task_id, title=video["title"], thumbnail=video.get("thumbnail"), duration=video.get("duration"))
+        enqueue(task_id, video["url"], fmt, quality, None)
         await download_queue.put((task_id, video["url"], DownloadFormat(fmt), quality, None))
         queued_count += 1
 
-    sub["last_checked"] = datetime.now().isoformat()
-    sub["last_video_count"] = queued_count
-    save_subscriptions(subs)
+    update_sub(sub_id, last_checked=datetime.now().isoformat(), last_video_count=queued_count)
 
     return {
         "subscription_name": result.get("title", ""),
@@ -1082,7 +986,7 @@ async def queue_status():
     """Get current download queue status."""
     downloading = MAX_CONCURRENT_DOWNLOADS - DOWNLOAD_SEMAPHORE._value
     return {
-        "pending": download_queue.qsize(),
+        "pending": queue_size(),
         "downloading": downloading,
         "active_uploads": _active_uploads,
         "max_concurrent": MAX_CONCURRENT_DOWNLOADS,
@@ -1092,46 +996,45 @@ async def queue_status():
 
 
 @app.get("/api/concurrency/config")
-async def get_concurrency_config():
+async def get_concurrency_config_endpoint():
     """Get current concurrency configuration."""
-    global MAX_CONCURRENT_DOWNLOADS, CD2_TEMP_DIR, CHECK_INTERVAL
-    cfg = load_concurrency_config()
+    cfg = get_all_config()
     return {
-        "max_concurrent_downloads": cfg["max_concurrent_downloads"],
-        "cd2_temp_dir": cfg["cd2_temp_dir"],
-        "check_interval": cfg["check_interval"],
+        "max_concurrent_downloads": cfg.get("max_concurrent_downloads", 3),
+        "cd2_temp_dir": cfg.get("cd2_temp_dir", "/opt/docker/cd2/temp"),
+        "check_interval": cfg.get("check_interval", 5),
         "current_max": MAX_CONCURRENT_DOWNLOADS,
         "cd2_temp_files": count_cd2_temp_files(),
     }
 
 
 @app.post("/api/concurrency/config")
-async def update_concurrency_config(req: dict):
+async def update_concurrency_config_endpoint(req: dict):
     """Update concurrency configuration."""
     global MAX_CONCURRENT_DOWNLOADS, DOWNLOAD_SEMAPHORE, CD2_TEMP_DIR, CHECK_INTERVAL
-    
-    cfg = load_concurrency_config()
-    
+
+    cfg = get_all_config()
+
     if "max_concurrent_downloads" in req:
         new_max = int(req["max_concurrent_downloads"])
         if new_max < 1 or new_max > 10:
             raise HTTPException(status_code=400, detail="max_concurrent_downloads must be between 1 and 10")
         cfg["max_concurrent_downloads"] = new_max
-    
+        set_config("max_concurrent_downloads", new_max)
+
     if "cd2_temp_dir" in req:
         cfg["cd2_temp_dir"] = req["cd2_temp_dir"]
-    
+        set_config("cd2_temp_dir", req["cd2_temp_dir"])
+
     if "check_interval" in req:
         cfg["check_interval"] = int(req["check_interval"])
-    
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(cfg, f, indent=2)
-    
-    MAX_CONCURRENT_DOWNLOADS = cfg["max_concurrent_downloads"]
-    CD2_TEMP_DIR = cfg["cd2_temp_dir"]
-    CHECK_INTERVAL = cfg["check_interval"]
+        set_config("check_interval", int(req["check_interval"]))
+
+    MAX_CONCURRENT_DOWNLOADS = cfg.get("max_concurrent_downloads", 3)
+    CD2_TEMP_DIR = cfg.get("cd2_temp_dir", "/opt/docker/cd2/temp")
+    CHECK_INTERVAL = cfg.get("check_interval", 5)
     DOWNLOAD_SEMAPHORE = asyncio.Semaphore(MAX_CONCURRENT_DOWNLOADS)
-    
+
     return {"success": True, "config": cfg}
 
 
@@ -1168,7 +1071,6 @@ async def list_files(
                     created_at=task["created_at"],
                     cloud_path=task.get("cloud_path"),
                 ))
-    # Filter by search query (title)
     if q:
         q_lower = q.lower()
         files = [f for f in files if q_lower in (f.title or "").lower()]
@@ -1192,9 +1094,9 @@ async def cookies_status():
 
 @app.websocket("/ws/{task_id}")
 async def websocket_endpoint(websocket: WebSocket, task_id: str):
-    # Accept token from query param for WebSocket auth
     token = websocket.query_params.get("token", "")
-    if not token or token not in ACTIVE_TOKENS:
+    username = get_token(token)
+    if not username:
         await websocket.close(code=1008, reason="Unauthorized")
         return
     await websocket.accept()
@@ -1203,12 +1105,10 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
 
     def on_message(msg):
         messages.append(msg)
-        # Fire-and-forget send
         asyncio.create_task(_safe_send(websocket, msg))
 
     unsubscribe = task_manager.subscribe(task_id, on_message)
 
-    # Send initial state
     task = task_manager.get_task(task_id)
     if task:
         initial = {
@@ -1223,13 +1123,11 @@ async def websocket_endpoint(websocket: WebSocket, task_id: str):
             "error": task.get("error"),
         }
         await websocket.send_json(initial)
-        # Replay recent messages
         for msg in messages[-5:]:
             await websocket.send_json(msg.dict() if hasattr(msg, "dict") else msg)
 
     try:
         while True:
-            # Keep connection alive
             try:
                 data = await asyncio.wait_for(websocket.receive_text(), timeout=30)
             except asyncio.TimeoutError:

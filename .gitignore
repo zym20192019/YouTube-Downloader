@@ -10,3 +10,5 @@ downloads/
 *.log
 .claude/
 task_history.json
+data/
+*.bak

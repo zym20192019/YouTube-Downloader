@@ -1,5 +1,4 @@
 import os
-import json
 import asyncio
 import threading
 from pathlib import Path
@@ -9,28 +8,13 @@ import yt_dlp
 
 from app.tasks import task_manager
 from app.models import DownloadFormat
+from app.database import get_auto_move_path
 
 
 DOWNLOAD_DIR = Path("/root/youtube-downloader/downloads")
 DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 COOKIE_FILE = Path("/root/youtube-downloader/cookies.txt")
-
-PATH_CONFIG_FILE = Path("/root/youtube-downloader/path_config.json")
-
-
-def get_auto_move_path() -> Optional[dict]:
-    """Get the auto-move path configuration if enabled."""
-    if PATH_CONFIG_FILE.exists():
-        try:
-            with open(PATH_CONFIG_FILE, "r") as f:
-                paths = json.load(f)
-                for p in paths:
-                    if p.get("auto_move", False):
-                        return p
-        except (json.JSONDecodeError, IOError):
-            pass
-    return None
 
 
 def _format_seconds(seconds: Optional[float]) -> Optional[str]:
