@@ -839,7 +839,7 @@ async def _check_single_subscription(sub: dict) -> dict:
     downloaded = []
     queued_count = 0
     if sub.get("auto_download", True) and new_videos:
-        for video in new_videos[:10]:
+        for video in new_videos:
             fmt = sub.get("format", "best") or "best"
             quality = sub.get("quality")
             task_id = task_manager.create_task(video["url"], DownloadFormat(fmt), quality)
@@ -854,7 +854,7 @@ async def _check_single_subscription(sub: dict) -> dict:
         "total_videos": len(result["entries"]),
         "new_videos": len(new_videos),
         "downloaded": downloaded,
-        "skipped": max(0, len(new_videos) - 10),
+        "skipped": 0,
         "queued": queued_count,
     }
 
