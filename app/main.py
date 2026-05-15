@@ -657,6 +657,54 @@ async def retry_task(task_id: str):
     return TaskResponse(**new_task)
 
 
+@app.post("/api/tasks/batch-retry")
+async def batch_retry_tasks(req: BatchDeleteRequest):
+    """Retry all failed tasks. task_ids: list of task IDs to retry, or empty to retry ALL failed tasks."""
+    from app.models import DownloadFormat
+
+    all_tasks = task_manager.list_tasks()
+    if req.task_ids:
+        failed = [t for t in all_tasks if t["task_id"] in req.task_ids and t.get("status") == "error"]
+    else:
+        failed = [t for t in all_tasks if t.get("status") == "error"]
+
+    results = {"retried": 0, "failed": 0, "details": []}
+
+    for task in failed:
+        task_id = task["task_id"]
+        url = task.get("url")
+        if not url:
+            results["failed"] += 1
+            results["details"].append({"task_id": task_id, "status": "skipped", "reason": "Missing URL"})
+            continue
+
+        fmt = task.get("format", "video")
+        quality = task.get("quality")
+        hdr = task.get("hdr")
+
+        # Clean up old file if exists
+        if task.get("filepath") and os.path.exists(task["filepath"]):
+            try:
+                os.remove(task["filepath"])
+            except OSError:
+                pass
+
+        task_manager.delete_task(task_id)
+
+        try:
+            fmt_enum = DownloadFormat(fmt) if fmt else DownloadFormat.VIDEO
+            new_id = task_manager.create_task(url, fmt_enum, quality)
+            enqueue(new_id, url, fmt_enum.value, quality, hdr)
+            await download_queue.put((new_id, url, fmt_enum, quality, hdr))
+            results["retried"] += 1
+            results["details"].append({"task_id": task_id, "new_task_id": new_id, "status": "retried"})
+        except Exception as e:
+            results["failed"] += 1
+            results["details"].append({"task_id": task_id, "status": "failed", "reason": str(e)})
+
+    return results
+
+
 @app.post("/api/move", response_model=MoveResponse)
 async def move_file(req: MoveRequest):
     global _active_uploads

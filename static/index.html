@@ -1328,6 +1328,7 @@ header p {
 <div class="batch-bar" id="batchBar" style="display: none;">
   <span class="batch-count" id="batchCount">已选 0 项</span>
   <div class="batch-actions">
+    <button class="btn btn-sm btn-warning" id="batchRetryBtn" style="display: none;" onclick="batchRetry()">🔄 批量重试</button>
     <button class="btn btn-sm btn-danger" onclick="batchDelete()">🗑️ 批量删除</button>
     <div class="batch-move-btns" id="batchMoveBtns"></div>
   </div>
@@ -1452,6 +1453,14 @@ function updateBatchBar() {
     return t && (t.status === 'done' || t.status === 'moved');
   });
 
+  // Show retry button if any selected task is in error state
+  const errorIds = Array.from(SELECTED_TASKS).filter(id => {
+    const t = TASKS[id];
+    return t && t.status === 'error';
+  });
+  const retryBtn = document.getElementById('batchRetryBtn');
+  if (retryBtn) retryBtn.style.display = errorIds.length > 0 ? 'inline-block' : 'none';
+
   if (doneIds.length > 0) {
     const paths = Array.isArray(MOVE_PATHS) ? MOVE_PATHS : [];
     moveBtns.innerHTML = paths.map(p => {
@@ -1518,6 +1527,34 @@ async function batchDelete() {
     loadFiles();
   } catch (e) {
     showToast('批量删除失败: ' + e.message, 'error');
+  }
+}
+
+// Batch retry failed tasks
+async function batchRetry() {
+  const ids = Array.from(SELECTED_TASKS).filter(id => {
+    const t = TASKS[id];
+    return t && t.status === 'error';
+  });
+  if (ids.length === 0) {
+    showToast('没有可重试的失败任务', 'info');
+    return;
+  }
+  if (!confirm(`确定重试 ${ids.length} 个失败任务？`)) return;
+  showToast(`正在重试 ${ids.length} 个失败任务...`, 'info');
+  try {
+    const res = await authFetch(`${API}/api/tasks/batch-retry`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ task_ids: ids }),
+    });
+    const data = await res.json();
+    SELECTED_TASKS.clear();
+    updateBatchBar();
+    showToast(`批量重试完成：成功入队 ${data.retried} 个，失败 ${data.failed} 个`, data.failed > 0 ? 'error' : 'success');
+    loadTasks();
+  } catch (e) {
+    showToast('批量重试失败: ' + e.message, 'error');
   }
 }
 
