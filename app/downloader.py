@@ -124,7 +124,8 @@ def _get_ydl_opts(task_id: str, fmt: DownloadFormat, quality: Optional[str] = No
         "geo_bypass": True,
         "remote_components": ["ejs:github"],
         "extractor_retries": 5,
-        "sleep_interval_requests": 0.5,              # 请求间隔防限速
+        "sleep_interval_requests": 3.0,              # 请求间隔防限速（从 0.5s 提高到 3s）
+        "sleep_interval": 5,                          # 每个视频之间额外等待 5 秒
     }
 
     if COOKIE_FILE.exists():
