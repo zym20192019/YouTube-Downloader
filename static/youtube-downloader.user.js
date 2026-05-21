@@ -22,8 +22,8 @@
   // ========== 配置 ==========
   const DEFAULT_CONFIG = {
     servers: [
-      { name: '本机', url: 'http://23.19.231.70:8080' },
-      { name: 'RN', url: 'http://142.171.27.76:8080' },
+      { name: '本机', url: 'http://23.19.231.70:8081' },
+      { name: 'RN', url: 'http://142.171.27.76:8081' },
     ],
     defaultServer: 0,
     defaultFormat: 'video',

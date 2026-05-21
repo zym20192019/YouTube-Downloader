@@ -1,7 +1,7 @@
 #!/bin/bash
 # YouTube Downloader - Startup Script
 
-PORT=${1:-8080}
+PORT=${1:-8081}
 
 echo "🚀 Starting YouTube Downloader on port $PORT..."
 
